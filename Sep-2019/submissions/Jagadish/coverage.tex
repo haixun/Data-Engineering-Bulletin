@@ -1,0 +1,64 @@
+\vspace{-3mm}
+\section{Coverage in Training Data}\label{sec:coverage} %2.5 to 3 pages
+\vspace{-3mm}
+So far in this paper, we discussed responsible design of scoring functions by a human expert.
+Scoring models are also used for tasks such as classification and prediction
+Such scoring models can be complex and are often determined using machine learning techniques. An essential piece to the learning is a labeled training dataset.
+This dataset could be collected prospectively, such as through a survey or a scientific experiment. In such a case, a data scientist may be able to specify requirements such as representation and coverage.
+However, more often than not, analyses are done with data that has been acquired independently, possibly through a process on which the data scientist has limited, or no, control. This is often called ``found data'' in the data science context.
+It is generally understood that the training dataset must be representative of the distribution from which the actual test/production data will be drawn.  More recently, it has been recognized that it is not enough for the training data to be representative: it must include enough examples from less popular ``categories'', if these categories are to be handled well by the trained system.  Perhaps the best known story underlining the importance of this inclusion is the case of the ``google gorilla'' \cite{google-gorilla}.  An early image recognition algorithm released by Google had not been trained on enough dark-skinned faces.  When presented with an image of a dark African American, the algorithm labeled her as a ``gorilla''.  While Google very quickly patched the software as soon as the story broke, the question is what it could have done beforehand to avoid such a mistake in the first place.
+The Google incident is not unique: there have been many other such incidents.
+For example, Nikon introduced a camera feature to detect whether humans in the image have their eyes open -- to help avoid the all-too-common situation of the camera-subject blinking when the flash goes off resulting in an image with eyes closed.  Paradoxically for a Japanese company, their training data did not include enough East Asians, so that the software classified many (naturally narrow) open Asian eyes as closed~\cite{closed-eyes}.
+% Similarly, HP webcams were not able to detect black faces~\cite{hp1} due to inadequate coverage in the training data~\cite{hp2}.
+
+The problem becomes critical when the data is used for training models for data-driven algorithmic decision making.
+For example, %judges, probation and parole officers are increasingly using algorithms to assess a criminal defendant's likelihood to re-offend~\cite{propublica}.
+consider a tool designed to help judges in sentencing criminals by predicting how likely an individual is to re-offend. 
+Such a tool can provide insightful signals for the judge and have the potential to make society safer.
+On the other hand, a wrong signal can have devastating effects on individuals' lives.
+So it is important to make sure that the tool is trained on data that includes adequate representation of individuals similar to each person that will be scored by it.
+In \cite{asudeh2019assessing}, we study a real dataset of criminals used for building such a tool, published by Propublica~\cite{propublica}. We demonstrate that a model with an acceptable overall accuracy had an accuracy worse than random guess for Hispanic females, due to inadequate representation.
+
+While Google's resolution to the gorilla incident was to ``ban gorillas''~\cite{google-gorilla-resolution}, a better solution is to ensure that the training data has enough entries in each category.
+Referring to the issue as ``disparate predictive accuracy'', \cite{chen2018my} also highlights that the problem often is due to the insufficient or skewed sample sizes.
+If the only category of interest were race, as in (most of) the examples above, there are only a handful of categories and this problem is easy.
+However, in general, objects can have tens of attributes of interest, all of which could potentially be used to categorize the objects.  
+For example, survey scientists use multiple demographic variables to characterize respondents, including race, sex, age, economic status, and geographic location.
+Whatever be the mode of data collection for the analysis task at hand, we must ensure that there are enough entries in the dataset for each object category.  
+Drawing inspiration from the literature on diversity \cite{diversity-jag}, we refer to this concept as {\em coverage}.
+
+Lack of coverage in a dataset also opens up the room for adversarial attacks~\cite{biggio2013evasion}. The goal in an adversarial attack is to generate examples that are misclassified by a trained model.
+Poorly covered regions in the training data provide the adversary with opportunities to create such examples.
+For instance, consider the gorilla incident again. Knowing that black people are under-represented in the dataset gives the adversary the information that the models trained using this dataset are not well-trained for this category. The adversary can use this information to generate examples that are misclassified by the model.
+
+Our objective here is two-fold.
+First, we want to help the dataset users to  assess the coverage, as a characterization, of a given dataset, in order to understand such vulnerabilities.
+For example, we use information about lack of coverage as a widget in the nutritional label~\cite{yang2018nutritional} of a dataset, in our MithraLabel system\footnote{http://mithra.eecs.umich.edu/demo/label/}\cite{sun2019mithralabel}.
+Once the lack of coverage has been identified, next we would like to help data owners improve coverage by identifying the smallest number of additional data points needed to hit all the ``large uncovered spaces''.
+
+
+Given multiple attributes, each with multiple possible values, we have a combinatorial number of possible {\em patterns}, as we call  combinations of values for some or all attributes.  Depending on the size and skew in the dataset, the coverage of the patterns will vary.  Given a dataset, our first problem is to efficiently identify patterns that do not have sufficient coverage (the learned model may perform poorly in portions of the attribute space corresponding to these patterns of attribute values).  It is straightforward to do this using space and time proportional to the total number of possible patterns.  Often, the number of patterns with insufficient coverage may be far fewer.  In~\cite{asudeh2019assessing}, we develop techniques, inspired from set enumeration and association rule mining ({\em apriori})~\cite{apriori}, to make this determination efficient.
+
+A more interesting question for the dataset owners is what they can do about lack of coverage.
+Given a list of patterns with insufficient coverage, they may try to fix these, for example by acquiring additional data.  In the ideal case, they will be able to acquire enough additional data to get sufficient coverage for all patterns.  However, acquiring data has costs, for data collection, integration, transformation, storage, etc.  Given the combinatorial number of patterns, it may just not be feasible to cover all of them in practice.  Therefore, we may seek to make sure that we have adequate coverage for at least any combination of $\ell$ attributes, where we call $\ell$ the {\em maximum covered level}.
+Alternatively, we could identify important pattern combinations by means of a {\em value count}, indicating how many combinations of attribute values match that pattern.
+Hence, our goal becomes to determine the patterns for the minimum number of items we must add to the dataset to reach a desired maximum covered level or to cover all patterns with at least a specified minimum value count.
+%how a transformation to the frequent item-set problem can help in efficiently solving the problem.
+
+We consider the low-dimensional categorical (sensitive) attributes $\mathcal{A} = \{A_1$, $A_2$, ..., $A_d\}$ such as {\tt \small race}, {\tt \small gender}, and {\tt \small age} for studying coverage. Where attributes are continuous valued or of high cardinality, we consider using techniques such as (a) bucketization: putting similar values into the same bucket, or (b) considering the hierarchy of attributes in the data cube for reducing the cardinality of any one attribute.
+To capture lack of coverage in the dataset, we define a pattern $P$ as a vector of size $d$, in which $P[i]$ is either $X$ (meaning that its value is unspecified) or is a value of attribute $A_i$. We name the elements with value $X$ as non-deterministic and the others as deterministic.
+We say an item $t$  {\em matches} a pattern $P$ (written as $M(t,P)= \top$), if for all $i$ for which $P[i]$ is deterministic, $t[i]$ is equal to $P[i]$.
+For example, consider the pattern $P$ = $X1X0$ on four binary attributes $A_1$ to $A_4$.
+It describes the value combinations that have the value 1 on $A_2$ and 0 on $A_4$.
+Hence, for example, $t_1=[1,1,0,0]$ matches $P$, while $t_3=[1,0,1,0]$ does not match it, because $P[2]=1$ and $t_3[2]=0$.
+Using the patterns to describe the space of value combinations, we define the coverage of a pattern $P$ as the number of items in $\mathcal{D}$ that match it.
+We say a pattern $P$ is dominated by another pattern $P'$ if all value combinations matching it also match $P'$.
+Our (lack of coverage) identification problem is to discover {\em Maximal Uncovered Patterns} (MUPs), the set of uncovered patterns (patterns with coverage less than a threshold) that are not dominated by another uncovered pattern.
+This problem is \#P-complete.
+At a high level, we define a directed acyclic graph (DAG) that captures the domination relation between the patterns and transform the problem into an enumeration on this graph while using the monotonicity property of coverage for pruning the search space.
+
+We note that not all combinations of attribute values are of interest.  Some may be extremely unlikely, or even infeasible.  For example, we may find few people with attribute {\tt \small age} as ``teen'' and attribute {\tt \small education} as ``graduate degree''.
+A human expert, with sufficient domain knowledge, is required to be in the loop for (i) identifying the attributes of interest, over which coverage is studied, (ii) setting up a {\em validation oracle} that identifies the value combinations that are not realistic, and (iii) identifying the uncovered patterns and the granularity of patterns that should get resolved during the coverage enhancement.
+
+Our coverage enhancement problem is: given a dataset $\mathcal{D}$, its set of material MUPs $\mathcal{M}_\mathcal{D}$, and a positive integer number $\lambda$, to determine the minimum set of additional tuples to collect such that, after the data collection, the maximum number of deterministic values in any MUP is at least $\lambda$. The problem, using a polynomial-time reduction from the vertex cover problem, turns out to be NP-complete. 
+Since a single tuple could contribute to the coverage of multiple patterns, we shall show that this problem translates to a hitting set~\cite{vazirani2013approximation} instance. Using this transformation, we show that the greedy approach provides a logarithmic approximation-ratio for the problem. Given the exponential number of value combinations, the direct implementation of hitting set techniques can be very expensive. Hence, we also provide an efficient implementation of the greedy approach.

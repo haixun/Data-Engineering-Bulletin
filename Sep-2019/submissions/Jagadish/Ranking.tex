@@ -1,0 +1,271 @@
+\section{Responsible Ranking}\label{sec:ranking}
+Ranking of individuals is commonplace today, and is used, for example, for college admissions and employment. 
+% Properly, topics such as ranking, top-$k$ query processing, and building indexes to efficiently answer such queries, have recently been increasingly relevant to database research.
+Score-based evaluators, designed by human experts, are commonly used for ranking, especially when there are multiple criteria to consider.
+The scores are usually computed by linearly combining (with non-negative weights) the relevant attributes of each individual from some dataset $\mathcal{D}$. Then, we sort the individuals in decreasing order of score and finally return either the full ranked list or its highest-scoring sub-set, the top-$k$. 
+
+Formally, we consider a dataset $\mathcal{D}$ to consist of $n$ items, each with $d$ scalar scoring attributes. In addition to the scoring attributes, the dataset may contain non-scoring attributes that are used for filtering, but they are not our concern here.  Thus we represent an item $t \in \mathcal{D}$ as a $d$-length vector of scoring attributes, $\langle x_1, x_2, \ldots, x_d \rangle$.  Without loss of generality, we assume that the scoring attributes have been appropriately transformed: normalized to non-negative values between 0 and 1, standardized to have equivalent variance, and adjusted so that larger values are preferred.
+A {\em scoring function} $f_{\vec{w}}: \mathbb{R}^d\rightarrow\mathbb{R}$, with weight vector $\vec{w} ~ = ~\langle w_1, w_2,\ldots,w_d \rangle$, assigns the score $f_{\vec{w}}(t) = \Sigma_{j=1}^d w_j t[j]$ to any item $t\in\mathcal{D}$.
+
+Linear scoring functions are straightforward to compute and easy to understand~\cite{asudeh2016query}.
+That is the reason they are popular for ranking, and for evaluation in general.
+However, it turns out that the rankings may highly depend on the design of these functions.
+To further explain this, let us consider the following toy example.
+
+\begin{example}\label{example1}
+\em
+Consider a real estate agency with two offices in Chicago, IL and Detroit, MI.
+The owner assigns agents based on need (randomly) to the offices.
+By the end of the year, she wants to give a promotion to the ``best'' three agents.
+The criteria for choosing the agents are $x_1:$ {\tt \small sales} and $x_2:$ {\tt \small customer satisfaction}.
+Figure~\ref{fig:toyexample:data} shows the values in $\mathcal{D}$, after normalization.
+Considering the two criteria to be (roughly) equally important, the owner chooses the weights $\vec{w}=\langle 1, 1 \rangle$ for scoring. That is, the score of every agent is computed as $f=x_1+x_2$.
+The 5th column in Figure~\ref{fig:toyexample:data} shows the scores, based on this function.
+According to function $f$, the top-3 agents are $t_6$, $t_4$, and $t_2$, with scores 1.4, 1.38, and 1.37, respectively. 
+Note that, according to $f$, all top-3 agents are located in Chicago and no agent from Detroit is selected.
+\end{example}
+
+\begin{figure*}[!tb]
+\begin{minipage}[t]{0.39\textwidth}
+\centering
+\small
+\vspace{-38mm}
+    \begin{tabular}{|l|c|c|@{}c@{}||@{}c@{}|@{}c@{}|}
+	\hline
+	\multicolumn{4}{|c||}{$\mathcal{D}$} & $f$&$f'$ \\ \hline
+	id   & $x_1$ & $x_2$ & location&$ \; \langle 1, 1 \rangle \;$&$\langle 1.11, .9 \rangle$ \\ \hline \hline
+	$t_1$& 0.63 & 0.71&Detroit&1.34&1.338 \\ \hline
+	$t_2$& 0.72 & 0.65&Chicago&1.37&1.384 \\ \hline
+	$t_3$& 0.58 & 0.78&Detroit&1.36&1.387 \\ \hline
+    $t_4$& 0.7 & 0.68&Chicago&1.38&1.389 \\ \hline
+	$t_5$& 0.53 & 0.82&Detroit&1.35&1.321 \\ \hline
+	$t_6$& 0.61 & 0.79&Chicago&1.4&1.388 \\ \hline
+	\end{tabular}
+    \vspace{-1mm}\caption{Example~\ref{example1}-Data}
+    \label{fig:toyexample:data}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.32\textwidth}
+\centering
+    \includegraphics[width=\textwidth]{figs/dualspace.jpg}
+    \vspace{-10mm}\caption{Example~\ref{example1}-Dual space}
+    \label{fig:toyexample:dual}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.25\textwidth}
+\centering
+    \includegraphics[width=\textwidth]{figs/orderingexchange.jpg}
+    \vspace{-10mm}\caption{Ordering exchange between $t_1$:[1,2] and $t_2$:[2,1]}
+    \label{fig:orderingexchange}
+\end{minipage}
+\vspace{-8mm}
+\end{figure*}
+
+The specific weights chosen have a huge impact on the score and hence rank for an item.
+In Example~\ref{example1}, the owner chose the weight vector $\vec{w}=\langle 1, 1 \rangle$, {\em in an ad-hoc manner}, without paying attention to the consequences.
+However, small changes in the weights could dramatically change the ranking. 
+For example, the function $f'$ with the weight vector $\vec{w'}=\langle 1.1, .9 \rangle$ may be equally good for the owner and she may not even have a preference between $\vec{w}$ and $\vec{w}'$. Probably her choice of weights is only because $\vec{w}$ is more intuitive to human beings.
+The last column in Figure~\ref{fig:toyexample:data} shows the scores based on $f'$, which produce the ranking $f': \langle t_4, t_6, t_3, t_2, t_1, t_5\rangle$. Comparing it with the ranking generated by $f:  \langle t_6, t_4, t_2, t_3, t_5, t_1\rangle$, one may notice that the rank of each and every individual has changed. More importantly, while according to $f$ all promotions are given to the agents of the Chicago office, $f'$ gives two promotions to Chicago and one to Detroit.
+
+Many sports use ranking schemes. An example is the FIFA World Ranking of national soccer teams based on  recent performance.
+FIFA uses these rankings as ``a reliable measure for comparing national A-teams''~\cite{fifa}. 
+Despite the trust placed by FIFA in these rankings, many critics have questioned their validity.
+University rankings is another example that is both prominent and often contested~\cite{Gladwell11Order}: various entities, such as U.S. News and World Report, Times Higher Education, and QS, produce such rankings.  Similarly, many funding agencies compute a score for a research proposal as a weighted sum of scores of its attributes. These rankings are, once again, impactful, yet heavily criticized.
+Similarly, in criminal justice, COMPAS~\cite{propublica} was originally intended to provide services and positive interventions, under resource constraints.  That is, a score computed by COMPAS would then be used to rank individuals to prioritize access to services.
+Many other impactful examples can be mentioned, such as a company that evaluates its employees to promote some and let go some others, and a college admissions officer who decides to admit a small portion of the applicants.
+
+Surprisingly, similar to Example~\ref{example1}, despite the enormous impact of score-based rankers, attribute weights are usually assigned in an ad-hoc manner, based only on intuitive reasoning and common-sense of the human designers.
+For instance, in the case of FIFA rankings, the scoring formula combines  the past four years  of performance of each team as $x_1+0.5x_2+0.3x_3+0.2x_4$, where $x_i$ is the team's performance in the past $i^{th}$ year. Of course, the designers tried to come up with a set of weights that make sense. For them $0.98x_1+0.51x_2+0.29x_3+0.192x_4$ would probably be equally acceptable, since the weight values are virtually identical: they choose the former formula simply because round numbers are more intuitive.
+This issue, in the context of university ranking, is further elaborated by Malcolm Gladwell in~\cite{Gladwell11Order}.
+
+Assuming that the designers of rankings are willing to accept scoring functions similar to their initial functions, Mithra provides a toolbox and algorithms to help human experts practice responsible ranking. In the following, we start by providing some necessary background from computational geometry in \S~\ref{sec:bgnd}, followed by an explanation of fairness and stability in our framework in \S~\ref{sec:defs}.
+
+\subsection{Fairness and Stability Models}\label{sec:defs} % 1 page
+Decisions based on rankings may impact the lives of individuals and even influence societal policies. For this reason, it is essential to  make the development and deployment of rankings transparent and otherwise principled.
+Also, since rankings highly depend on what weights are chosen in the scoring function, it is necessary to make sure that generated rankings are fair and robust.
+
+\subsubsection{Fairness}
+There is not a single universal definition of fairness.  
+Impossibility theorems~\cite{friedler2016possibility} have established that we cannot simultaneously achieve all types of fairness.
+Indeed, the appropriate definitions of fairness greatly depend on the context and on the perspective of the user. Sometimes, it may even be prescribed by law. 
+As such, we consider a general definition of fairness in our work. Our focus is on societal (v.s. statistical) bias~\cite{narayanan2018translation} and group fairness~\cite{hardt2016equality} (v.s. individual fairness~\cite{dwork2012fairness}).
+
+We consider some attributes, used for decision making (e.g. sales and customer satisfaction in Example~\ref{example1}), to be {\em non-sensitive}. Some other attributes, such as race and gender (and location in Example~\ref{example1}), we consider to be {\em sensitive}.
+We adopt the Boolean fairness model, in which a fairness oracle $\mathcal{O}$ takes as input an ordered list of items from $\mathcal{D}$, and determines whether the list
+satisfies a set of {\em fairness constraints}, defined over the sensitive attributes: $\mathcal{O}: \mathcal{r}_f(\mathcal{D}) \rightarrow \{\top, \bot\}$. A scoring function $f$ that gives rise to a fair ordering over  $\mathcal{D}$ is said to be {\em satisfactory}.
+For instance, in Example~\ref{example1}, assume that the owner knows that, because of some hidden factors, sales and customer satisfaction patterns are different in Chicago and Detroit. Hence, she considers the selection of the top-3 agents to be fair, if it assigns at least one of the promotions to each one of the offices. Note that according to this criterion, the ranking provided by $f=x_1+x_2$ is not fair as it assigns all three promotions to the agents in Chicago.
+On the other hand the ranking generated by function $f'=1.1x_1+.9x_2$ assigns two of the promotions to Chicago and one to Detroit, and hence is considered to be fair. 
+
+
+\subsubsection{Stability}
+We want a ranking to be {\em stable} with respect to changes in the weights used for scoring.  Given a particular ranked list of items, one question a consumer will ask is: how robust is the ranking? If small changes in weights can change the ranked order, then there cannot be much confidence in the correctness of the ranking. We call a ranking of items {\em stable} if it is generated by a large portion of scoring functions in the neighborhood of the initial scoring function specified by the expert. 
+
+Every scoring function in a universe $\mathcal{U}^*$ of scoring functions induces a single ranking of the items. But each ranking is generated by many functions.
+For a dataset $\mathcal{D}$, let $\mathfrak{R}_\mathcal{D}$ be the set of rankings over the items in $\mathcal{D}$ that are generated by at least one scoring function $f\in\mathcal{U}^*$. 
+Consider the set of scoring functions that generate a ranking $\mathfrak{r}\in\mathfrak{R}_\mathcal{D}$.
+Because this set of functions is continuous, we can think of it as a region in the space of all possible functions in $\mathcal{U}^*$.
+We use the region associated with a ranking to define the ranking's stability. The intuition is that a ranking is stable if it can be induced by a large set of functions.
+If the region of a ranking is large, then small changes in the weight vector are not likely to cross the boundary of a region and therefore the ranked order will not change. 
+For every region $R$, let its volume, $vol(R)$, be the measure of its bulk.
+Given a ranking $\mathfrak{r}\in\mathfrak{R}_\mathcal{D}$, the stability of $\mathfrak{r}$ is the proportion of scoring functions in $\mathcal{U}^*$ that generate $\mathfrak{r}$.
+That is, stability is the ratio of the volume of the ranking region of $\mathfrak{r}$ to the volume of $\mathcal{U}^*$. Formally:
+\begin{align}
+S_\mathcal{D}(\mathfrak{r}) = \frac{\mbox{vol}(R_\mathcal{D}(\mathfrak{r}))}{\mbox{vol}(\mathcal{U}^*)}
+\end{align}
+We emphasize that stability is a property of a ranking (not of a scoring function).
+
+
+\subsection{Geometric Interpretation}\label{sec:bgnd} %0.5 pages
+In the popular geometric model for studying data, each attribute is modeled as a dimension and items are interpreted as points in a multi-dimensional space.
+We transform this {\em Primal space} into a {\em dual space}~\cite{edelsbrunner}.
+%, where every item corresponds to a hyperplane.
+
+We use the dual space in $\mathbb{R}^d$, where an item $t$ is presented by a hyperplane $\mathsf{d}(t)$ given by the following equation of $d$ variables $x_1 \dots x_d$:
+\vspace{-5mm}
+\begin{align}\label{eq:dual}
+\mathsf{d}(t):~ t[1]\times x_1 + \dots + t[d]\times x_d = 1
+\end{align}
+
+Continuing with Example~\ref{example1}, Figure~\ref{fig:toyexample:dual} shows the items in the dual space. In $\mathbb{R}^2$, every item $t$ is a 2-dimensional hyperplane (i.e. simply a line) given by $\mathsf{d}(t): t[1] x_1 + t[2] x_2=1$.
+In the dual space, a scoring function $f_{\vec{w}}$ is represented as a ray starting from the origin and passing through the point $[w_1, w_2,...,w_d]$.
+For example, the function $f$ with the weight vector $\vec{w}=\langle 1,1 \rangle$ in Example~\ref{example1} is drawn in Figure~\ref{fig:toyexample:dual} as the origin-starting ray that passes through the point $[1,1]$. Note that every scoring function (origin-starting ray) can be identified by $(d-1)$ angles $\langle \theta_1, \theta_2, \cdots, \theta_{d-1} \rangle$, each in the range $[0,\pi/2]$. Thus, given a function $f_{\vec{w}}$, its angle vector can be computed using the polar coordinates of $w$.
+For example, the function $f$ in Figure~\ref{fig:toyexample:dual} is identified by the angle $\theta=\pi/4$.
+There is a one-to-one mapping between these rays and the points on the surface of the origin-centered unit $d$-sphere (the unit hypersphere in $\mathbb{R}^d$), or to the surface of any origin-centered $d$-sphere.
+Thus, (the first quadrant of) the unit $d$-sphere represents the universe of functions $\mathcal{U}$.
+
+Consider the intersection of a dual hyperplane $\mathsf{d}(t)$ with the ray of a function $f$.
+This intersection is in the form of $a\times\vec{w}$, because every point on the ray of $f$ is a linear scaling of $\vec{w}$.
+Since this point is also on the hyperplane $\mathsf{d}(t)$,
+$t[1]\times a\times w_1 + \dots + t[d]\times a\times w_d = 1$. Hence, $\sum t[j] w_j = 1/a$. This means that the dual hyperplane of any item with the score $f(t)=1/a$ intersects the ray of $f$ at point $a\times\vec{w}$.
+Following this, the ordering of the items based on a function $f$ is determined by the ordering of the intersection of the hyperplanes with the vector of $f$. The closer an intersection is to the origin, the higher its rank.
+For example, in Figure~\ref{fig:toyexample:dual}, the intersection of the line $t_6$ with the ray of $f=x_1 + x_2$ is closest to the origin, and $t_6$ has the highest rank for $f$.
+
+Consider the dual presentation of two items $t_1:[1,2]$ and $t_2:[2,1]$, shown in Figure~\ref{fig:orderingexchange}, and a function that passes through this intersection.
+We name this function the {\em ordering exchange} between $t_1$ and $t_2$.
+That is because this function partitions the space in two regions, where every function in the top-left region ranks $t_1$ higher than $t_2$ while every function in bottom-right ranks $t_2$ higher.
+In general, the ordering exchange between a pair of items $t_i$ and $t_j$ is identified by (the set of function on) the following origin-passing hyperplane:
+\begin{align}\label{eq:mdIntersect}
+\sum\limits_{k=1}^{d} (t_i[k] - t_j[k])w_k = 0
+\end{align}
+
+
+
+\subsection{Designing Fair Ranking Schemes}\label{sec:fairness} % 1 page
+We interpret fairness to mean that (a) disparate impact, which may arise as a result of historical discrimination, needs to be mitigated; and yet (b) disparate treatment cannot be exercised to mitigate disparate impact when the decision system is deployed. 
+Disparate impact arises when a decision making system provides outputs that benefit (or hurt) a group of people sharing a value of a sensitive attribute more frequently than other groups of people.
+{\em Disparate treatment}, on the other hand, arises when a decision system provides different outputs for groups of people with the same (or similar) values of non-sensitive attributes but with different values of sensitive attributes. To avoid disparate treatment, it is desirable (and in many cases mandated by law) to not use information about an individual's membership in a protected group as part of decision-making.
+Following these, our goal is to build a system that helps human expert to design fair ranking schemes, in the sense that those {\em both} mitigate disparate impact (by ensuring that appropriate proportionality constraints are satisfied) {\em and} do not exercise disparate treatment (by not explicitly using information about an individual's membership in a protected group) during deployment.  That is, a {\em single} evaluator will be used for all items in the dataset, irrespective of their membership in a protected group.
+
+Our goal~\cite{asudeh2019designing} is to build a system to assist a human designer of a scoring function in tuning attribute weights to achieve fairness.
+Formally, our {\em closest satisfactory function} problem is:
+Given a dataset $\mathcal{D}$ with $n$ items over $d$ scalar scoring attributes, a fairness oracle $\mathcal{O}: \mathcal{r}_f(\mathcal{D}) \rightarrow \{\top, \bot\}$, and a linear scoring function $f$ with the weight vector $\vec{w} = \langle w_1,w_2,\cdots ,w_d\rangle$, find the function $f'$ with the weight vector $\vec{w'}$ such that $\mathcal{O}(\mathcal{r}_{f'}(\mathcal{D}))=\top$  and the angular distance between $\vec{w}$ and $\vec{w'}$ is minimized.
+
+Since the tuning process does not occur too often, it may be acceptable for it to take some time. However, we know that humans are able to produce superior results when they get quick feedback in a design or analysis loop.  Ideally, a  designer of a ranking scheme would want the system to support her work through interactive response times.  Our goal is to meet this need, to the extent possible, by providing a query answering system. From the system's viewpoint, the challenge is to propose similar weight vectors that satisfy the fairness constraints, in interactive time.  To accomplish this, our solution operates with an offline phase and then an online phase.  In the offline phase, we process the dataset, and develop data structures that will be useful in the online phase. 
+In the online phase, the user specifies a {\em query} in the form of a scoring function $f$.
+If the ranking based on $f$ does not meet the predefined fairness constraints, we suggest to the user an alternative scoring function that is both satisfactory and similar to $f$. The user may accept the suggested function, or she may decide to manually adjust the query and invoke our system once again.
+
+The notion of ordering exchanges, explained in \S~\ref{sec:bgnd} is a key in the preprocessing phase.
+Consider the set of ordering exchange hyperplanes between all pairs of items in $\mathcal{D}$.
+Similar to Figure~\ref{fig:orderingexchange}, each hyperplane $h_{i,j}$ (the ordering exchange between $t_i$ and $t_j$) partitions the function space $\mathcal{U}$ in two regions where in one region $t_i$ outranks $t_j$ while in the other $t_j$ is ranked higher.
+The collection of these hyperplanes provide an arrangement~\cite{redlining} in the form of a dissection of the space into origin-starting connected $d$-cones with convex surfaces, we call {\em ranking regions}. All functions in a ranking region generate the same ranking while every ranking is generated by the functions of (at most) one ranking region.
+Hence, in the offline time it is enough to identify the satisfactory ranking regions whose rankings satisfy fairness constraints.
+
+For 2D, we design a raw-sweeping algorithm. At a high level, using a min-heap for maintaining the ordering exchanges, the algorithm sweeps a ray from the $x$ to $y$-axis.
+It first orders the items based on the $x$-axis and gradually updates the ordering as it visits an ordering exchange along the way. As the algorithm moves from one ranking region to the other, it checks if the new ranking is fair, and if so, marks the region as satisfactory.
+Each satisfactory region in 2D is identified by two angles as its beginning and end.
+We construct a the sorted list of (the borders of) satisfactory regions in the offline phase.
+Given a query function $f$ in online phase, we apply a binary search on the sorted list. If $f$ falls in a satisfactory region, the algorithm returns $f$, otherwise it returns the closest satisfactory border to $f$.
+
+Discovering the satisfactory regions in MD is challenging when there are more than two attributes.
+That is because the complexity of the arrangement of ordering exchanges is exponential in the number of attributes, $d$.
+Even given the satisfactory regions, answering user queries in interactive time is not possible. The reason is that we need to solve a non-linear programming problem for each satisfactory region, before answering each query.
+To address this issue, we propose an approximation algorithm for obtaining answers quickly, yet accurately.
+Our approach relies on first partitioning the function space, based on a user-controlled parameter $N$, into $N$ equi-volume cells, where each cell is a hypercube of $(d-1)$-dimensions.
+During preprocessing, we assign a satisfactory function $f_c'$ to every cell $c$ such that, for every function $f$, 
+the angle between $f$ and $f_c'$ is within a bounded threshold (based on the value of $N$) from $f$ and its optimal answer.
+To do so, we first identify the cells that intersect with a satisfactory region, and assign the corresponding satisfactory function to each such cell. Then, we assign the cells that are outside of the satisfactory regions to the nearest discovered satisfactory function.
+In the online phase, given an unsatisfactory function $f$, we need to find the cell to which $f$ belongs, and to return its satisfactory function. 
+This can be done in $O(\log N)$ by performing binary searches on the partitioned space.
+
+
+
+\subsection{Obtaining Stable Rankings}\label{sec:stability} % 0.75 page
+Magnitude of the ranking regions that produces an observed ranking identify its stability.
+Stability is a natural concern for consumers of a ranked list.  If a ranking is stable, then the same ranking would be obtained for many choices of weights.  But if this region is small, then we know that only a few weight choices can produce the observed ranking.  This may suggest that the ranking was engineered or ``cherry-picked'' by the producer to obtain a specific outcome. 
+Human experts who produce scoring functions for generating the rankings desire to produce stable results.  We argued in~\cite{yang2018nutritional} that stability in a ranked output is an important aspect of algorithmic transparency, because it allows the producer to justify their ranking methodology, and to gain the trust of consumers.
+Of course, stability cannot be the only criterion in the choice of a scoring function: the result may be weights that seem ``unreasonable'' to the ranking producer.  To support the producer, we allow them to specify a range of reasonable weights, or an {\em acceptable region} in the space of functions, and help the producer find stable rankings within this region. 
+
+We develop a framework~\cite{asudeh2018obtaining} that can be used to assess the stability of a provided ranking and to obtain a stable ranking within the the acceptable region of scoring functions.
+We address the case where the user cares about the rank order of the entire set of items, and also the case where the user cares only about the top-$k$ items.
+We focus on efficiently evaluating an operator we call {\sc \small get-next}, which can be used to discover the stable  rankings, ordered by their stability.
+Formally, for a dataset $\mathcal{D}$, a region of interest $\mathcal{U}^*$, and the top-$(h-1)$ stable rankings in $\mathcal{U}^*$, discovered by the previous {\sc \small get-next} calls,  our goal is to find the $h$-th stable ranking $\mathfrak{r}\in\mathfrak{R}$.
+Note that the {\sc \small get-next} operator enables discovering the top-$\ell$ stable rankings, for any arbitrary $\ell$. That simply can be done by calling the operator $\ell$ times.
+Our technical contribution for 2D is similar to the one for fair rankings. The 2D algorithm first discovers the ranking regions in $\mathcal{U}^*$ by sweeping a ray in it. The discovered rankings, along with their stabilities, are moved to a heap data structure. Then, every call of {\sc \small get-next} returns the next stable ranking from heap.
+
+For MD, we design a threshold-based algorithm that uses an arrangement~\cite{asudeh2019designing} tree data structure, AKA cell tree~\cite{tang2017determining}, to partially construct the arrangement of ordering exchange hyperplanes.
+Specifically, given that our objective is to find stable rankings and that the user will likely be satisfied after observing {\em a few} rankings,  rather than discovering all possible rankings, we target the discovery of only the next stable ranking and delay the arrangement construction for other rankings. 
+Arrangement construction is an iterative process that starts by partitioning the space into two half-spaces by adding the first hyperplane. The construction then iteratively adds the other hyperplanes; to add a new hyperplane, it first identifies the set of regions in the arrangement of previous hyperplanes with which the new hyperplane intersects, and then splits each such region into two new regions. The {\sc \small get-next} operator, however, only breaks down the largest region at every iteration, delaying the construction of the arrangement in all other regions. Please refer to \cite{asudeh2018obtaining} for more details about the algorithm.
+
+While being efficient in practice for medium-size settings, the algorithms based on arrangement construction are not scalable, as their worst-case complexities are cursed by the complexity of the arrangement.
+Next, we discuss function sampling as a powerful technique for aggregate estimation using Monte-carlo methods~\cite{montecarlo}, as well as an effective technique for search-space exploration.
+
+
+
+\subsection{Function Sampling for Scalability}\label{sec:sampling} % 1 page
+
+Uniform sampling from the scoring function space enables designing randomized algorithms for evaluating and designing score-based evaluators.
+In the following, we first discuss sampling from the complete function space and then propose an efficient unbiased sampling from a region of interest $\mathcal{U}^*$.
+
+As explained in \S~\ref{sec:bgnd}, there is a 1-1 mapping between the universe of scoring functions and the points on the surface of (the first quadrant of) the unit $d$-sphere. That is, every point one the surface of the $d$-sphere correspond to a scoring function and vice versa.
+Hence, the problem of choosing functions uniformly at random from $\mathcal{U}$ is equivalent to choosing random points from the surface of a $d$-sphere.
+As also suggested in~\cite{rrr}, we adopt a method for uniform sampling of the points on the surface of the unit $d$-sphere~\cite{muller1959note, marsaglia1972choosing}.
+Rather than sampling the angles, this method samples the weights using the {\em Normal distribution}, and normalizes them. 
+This works because the normal distribution function has a constant probability on the surfaces of $d$-spheres with common centers~\cite{marsaglia1972choosing}.
+Therefore, in order to generate a random function in $\mathcal{U}$, we set each weight as $w_i = |\mathcal{N}(0,1)|$, where $\mathcal{N}(0,1)$ draws a sample from the standard normal distribution.
+
+In order to compute an aggregate (or conduct exploration) by perturbing in a region of interest $\mathcal{U}^*$ in the neighborhood of some function $f$, we need to only sample from the set of functions with the maximum angle around the ray of $f$.
+% More than sampling from the complete function space, our techniques require drawing unbiased samples from a region of interest $\mathcal{U}^*$.
+An acceptance-rejection method~\cite{lucidl1989random} can be used for this purpose. That is, to draw a sample, uniformly at random, from $\mathcal{U}$ and accept it, if it belongs to $\mathcal{U}^*$.
+The efficiency of this method, however, depends on the volume of $\mathcal{U}^*$, as if it is small, the algorithm will reject most of the generated samples.
+Alternatively, we propose a sampler that works based on the following observation:
+modeling $\mathcal{U}^*$ as the surface unit $d$-spherical cap, each Riemannian piece of the surface forms a $(d-1)$-sphere.
+Following this observation, our sampler first selects a  Riemannian piece, randomly, proportional to its volume. Then it uses the Normal distribution to draw a sample from the surface of the Riemannian piece. 
+Please refer to \cite{asudeh2018obtaining} for more details about the design of this sampler.
+We would like to emphasize that the proposed sampler has a {\em linear complexity} to the number of attributes $d$. It therefore provides a powerful tool for studying the score-based evaluators in higher dimensions.
+
+We use function sampling for different purposes, including (i) evaluating the stability of a given ranking, (ii) designing a randomized algorithm for finding the stable rankings, and (iii) on-the-fly query processing for discovering fair functions.
+For (i) and (ii), in \cite{asudeh2018obtaining}, we design  Monte-carlo methods~\cite{montecarlo} that consume a set of $N$ function samples for finding the rankings in $\mathcal{U}^*$ and computing their stabilities.
+For (iii), function sampling provides a heuristics for on-the-fly fair ranking scheme query processing in large-scale settings~\cite{asudeh2019designing}.
+
+We used function sampling in MithraRanking~\cite{guan2019mithraranking}, our web application\footnote{http://mithra.eecs.umich.edu/demo/ranking/}, designed for responsible ranking design.
+After uploading a dataset, or choosing among available datasets, the application allows the user to specify the fairness constraints she wants to satisfy.
+For instance, in Figure~\ref{fig:MR1}, the user has added a constraint that the top-30\% of the ranking should contain at most 30\% with age more than 56 years old. Note that the interface gives the user the ability to add multiple fairness constraints.
+She then, as in Figure~\ref{fig:MR2}, specifies the weight vector of the initial scoring function and a region of interest around it, by specifying a cosine similarity.
+The system then ranks the data based on the specified function and checks if the ranking satisfies the fairness criteria. It also draws unbiased function samples from the region of interest to estimate the stability of the generated ranking. The system also uses the samples for finding the most stable rankings in the region of interest, the most similar fair function to the initial function, and a function (not necessarily the most similar) that generates a fair and stable ranking (Figure~\ref{fig:MR3}).
+The user can then accept any of those suggestions and change the ranking accordingly.
+
+\begin{figure*}[!tb]
+\begin{minipage}[t]{0.32\textwidth}
+\centering
+    \vspace{-35mm}
+    \includegraphics[width=\textwidth]{figs/m2.png}
+    \vspace{2mm}\caption{Specifying fairness constraints}
+    \label{fig:MR1}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.32\textwidth}
+\centering
+    \includegraphics[width=\textwidth]{figs/m3.png}
+    \vspace{-8mm}\caption{Specifying a weight vector}
+    \label{fig:MR2}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.32\textwidth}
+\centering
+    \includegraphics[width=\textwidth]{figs/m5.png}
+    \vspace{-8mm}\caption{System results}
+    \label{fig:MR3}
+\end{minipage}
+\end{figure*}
+
+
