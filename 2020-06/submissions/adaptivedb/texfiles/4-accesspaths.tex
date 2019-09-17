@@ -1,0 +1,215 @@
+%!TEX root=../bulletin.tex
+\section{Adapting Data Access Paths to Workload and Resources}
+\label{sec:accesspaths}
+
+Apart from loading and cleaning decisions,
+as data-centric applications become more complex, users face new 
+challenges when exploring data, which are magnified with the 
+ever-increasing data volumes. %Database systems must embrace 
+%adaptivity and provide query processing approaches 
+%that enable efficient execution of shifting workloads. 
+Data access methods have to dynamically adapt to evolving workloads 
+and take advantage of relaxed accuracy requirements. Furthermore, 
+query processing systems must be knowledgeable of the available 
+resources and maximize resource utilization thereby reduce waste. 
+To address the variety of workloads we design different adaptive 
+access path selection approaches depending on application precision 
+requirements.
+
+\Paragraph{Adaptive indexing over raw data} To achieve 
+efficient data access for applications requiring precise results 
+despite dynamic workloads we propose adaptive indexing for in-situ 
+query processing. We use state-of-the-art in-situ query 
+processing approaches to minimize data-to-query time. We 
+introduce a fine-grained logical partitioning scheme and combine it 
+with a lightweight indexing strategy to provide near-optimal raw data 
+access with minimal overhead in terms of execution time and memory
+footprint. To reduce the index selection overhead we propose an 
+adaptive technique for on-the-fly partition and index selection using 
+an online randomized algorithm.
+
+\Paragraph{Adapt access paths to approximation}
+Apart from adapting to data distribution, we need to enable scaling 
+of access paths despite ever-increasing datasets. We take advantage 
+of the relaxed precision requirements posed by data scientists who 
+tolerate imprecise answers for better query 
+performance~\cite{Cormode2012}. 
+Existing approaches~\cite{Agarwal2013,Chaudhuri2001b}, either require 
+full a priori knowledge of the workload to generate the required 
+approximate data structures or improve performance through minimizing 
+data access at query time. We design and demonstrate an adaptive 
+approach which generates synopses (summaries of the data, such as 
+samples, sketches, and histograms) as a by-product of query execution 
+and re-uses them for subsequent queries. It dynamically decides upon 
+synopsis materialization and maintenance while being robust to 
+workload and storage budget changes. To support interactive query 
+performance for ever increasing datasets and dynamic exploratory 
+workloads there is need for relaxed precision guarantees which enable 
+the use of approximate data structures and reduce the size of stored 
+and processed data.
+
+These aforementioned observations serve as a platform to show the 
+following key insights:
+i) Taking advantage of data characteristics in files can complement 
+in-situ query processing approaches by building data distribution 
+conscious access paths. Data properties such as ordering or 
+clustering enable the construction of access paths spanning subsets of
+a dataset thereby reducing the cost of tuning and storage, while minimizing 
+data access costs and further reducing the data-to-insight time.
+ii) Ever-increasing datasets make precise access paths prohibitively 
+expensive to build and store. Similarly, using data synopses as a 
+drop-in replacement for indexes limits their benefits. On the 
+contrary, integrating synopses as a first-class citizen in query
+optimization and materializing synopses during query execution and 
+re-using them across queries improves scalability and reduces 
+preprocessing.
+iii) Static tuning decisions can be suboptimal in the presence of 
+shifting exploratory workloads. On the other hand, adapting access 
+paths online, according to the workload while adhering to accuracy 
+requirements is key to provide high query performance in the
+presence of workload changes.
+
+\subsection{Adaptive indexing over Raw data files}
+
+Executing queries over raw data files, despite reducing cost through 
+avoiding the initial data loading step, it enables the access of data 
+files by multiple applications thus it prohibits the physical 
+manipulation of data files. 
+Building efficient data access paths requires physical 
+re-organization of files to reduce random accesses during query 
+execution. To overcome this constraint we propose an online 
+partitioning and indexing tuner for in-situ query processing which 
+when plugged into a raw data query engine, offers fast queries over 
+raw data files. The tuner reduces data access cost by: 
+i) logically partitioning a raw dataset to virtually break it
+into smaller manageable chunks without physical restructuring, and 
+ii) choosing appropriate indexing strategies over each logical 
+partition to provide efficient data access. 
+The tuner dynamically adapts the partitioning and indexing scheme as a 
+by-product  of query execution.
+It continuously collects information regarding the values and access 
+frequency of queried attributes at runtime. Based on this 
+information, it uses a randomized online algorithm to define the 
+logical partitions. For each logical partition, the tuner estimates 
+the cost-benefit of building partition-local index structures 
+considering both approximate membership indexing
+(i.e., Bloom filters and zone maps) and full indexing (i.e., bitmaps 
+and B + trees). By allowing fine-grained indexing decisions our 
+proposal makes the decision of the index shape at the level of each 
+partition rather than the overall relation. This has two positive 
+side-effects. First, there is no costly investment for indexing that 
+might prove unnecessary. Second, any indexing effort is tailored to 
+the needs of data accesses on the corresponding range of the dataset.
+
+\subsection{Adapting to Relaxed Precision}
+
+State-of-the-art AQP engines are classified into two categories,
+depending on the assumptions they make about the query workload.
+\emph{Offline AQP} engines (e.g. BlinkDB~\cite{Agarwal2013} and 
+STRAT~\cite{Chaudhuri2001b}) target applications where the query 
+workload is known a priori, e.g., aggregate dashboards that compute 
+summaries over a few fixed columns. Offline AQP engines analyse the 
+expected workload to identify the optimal set of synopses that should 
+be generated to provide fast responses to the queries at hand, 
+subject to a predefined storage budget and error tolerance 
+specification. Since this analysis is time-consuming, both due to the 
+computational complexity of the analysis task, as well as the I/O 
+overhead in generating the synopses, AQP engines perform the analysis 
+offline, each time the query workload or the storage budget changes.
+Offline AQP engines substantially improve query execution time 
+under predictable query workloads, however their need for a priori knowledge 
+of the queries makes them unsuitable for unpredictable workloads. 
+%
+To address unpredictable workloads \emph{online AQP} techniques 
+introduce approximation at query runtime. State-of-the-art online AQP 
+engines achieve this by introducing samplers during query execution. 
+By reducing the input tuples, samplers improve performance of the 
+operators higher in the query plan. In this way, online AQP 
+techniques can boost unknown query workloads. However, query-time 
+sampling is limited in the scope of a single query, as the generated 
+samples are not constructed with the purpose of reuse across queries 
+-- they are specific to the query, and are not saved. Thus, online 
+AQP engines offer substantially constrained performance gains 
+compared to their offline counterparts for predictable workloads.
+
+In summary, all state-of-the-art AQP engines sacrifice either 
+generality or performance, as they make 
+static, design-time decisions based on a fixed set of assumptions 
+about the query workload and resources. 
+However, modern data analytics workloads are complex, far 
+from homogeneous, and often contains a mix of queries that vary 
+widely with respect to the degree of 
+approximability~\cite{Agarwal2013}. 
+
+We design a self-tuning, adaptive, online AQP engine. Our design 
+builds upon ideas from (adaptive) database systems, such as 
+intermediate result materialization, query subsumption, materialized 
+view tuning and index tuning, and adapts these in the context of AQP, 
+while also enabling a combination and extension of the benefits of both offline 
+and online approximation engines. 
+%
+We extend the ideas of online AQP by injecting approximation 
+operators in the query plan, and enabling a broad range of queries over 
+unpredictable workloads.
+By performing online materialization of synopses as a byproduct of 
+query execution, we provide performance on-par with offline AQP 
+engines under predictable workloads, yet without an expensive offline 
+preparation phase. 
+%
+The main components of our system are the enhanced optimizer which enables the 
+use of approximate operators and matches existing synopses, and the 
+online tuner which decides on the materialization of intermediate results.
+
+\Paragraph{Integrating approximation to optimizer} Our system extends 
+a query optimizer with just-in-time approximation capabilities. 
+% inject synopsis operators
+The optimizer injects synopses operators into the query plan before 
+every aggregation. Intuitively, this represents the potential to 
+approximate at that location. 
+% transformation
+Subsequently, by using transformation rules, it pushes the synopses 
+operators closer to the raw input. The alternatives generated by 
+rules have no worse accuracy but can have better performance. 
+% costing
+The optimizer calculates the cost of each plan using data statistics 
+to decide a plan that adheres to user accuracy requirements and 
+improves performance.
+%
+Based on the generated query plans, the optimizer compares whether 
+any of the already materialized synopses may be re-used. To be 
+re-used a synopsis must (i) satisfy the accuracy guarantees  
+requirements, and (ii) subsume the required set of data.
+%
+If no existing synopses are candidates for re-use, the optimizer 
+interacts with the online tuner to decide whether to materialize 
+intermediate results.
+
+\Paragraph{Online Tuner}
+The optimizer feeds every prospective approximate plan to the online 
+tuner which stores execution metadata considering historical plans 
+(e.g., appearance frequency, execution cost).
+%
+Based on the historical plans, the tuner decides whether to introduce 
+a materializer operator to generate a summary. The tuner's
+decisions are driven by a cost:utility model, which leads to a 
+formalization of the task as an optimization challenge. As the 
+optimizer already ensures the precision of the query results, the 
+decisions made by the tuner affect solely query performance, and not 
+the required accuracy.
+%
+Finally, the tuner keeps track of the available storage budget and 
+decides on storage location and replication for a materialized 
+sub-plan. The tuner based on the available storage and the 
+cost:benefit model decides whether and which synopses to be stored or 
+evicted.
+
+By using approximate query processing one allows for low latency in return for 
+relaxed precision. However, the ever-increasing data sizes introduce 
+challenges to such systems. Specifically, offine approximation 
+approaches in order to offer low response time, they require long 
+pre-processing, full future workload knowledge and have high storage 
+requirements. On the other hand, online approximation approaches 
+although have no preprocessing, storage requirements and are
+workload-agnostic they have small performance gains. Our approach 
+adaptively combines the two approaches and trades precision and 
+storage for performance at runtime offering the best of both worlds.

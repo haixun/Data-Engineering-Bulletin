@@ -1,0 +1,171 @@
+%!TEX root=../bulletin.tex
+\section{Adapting Data Access and Query Engine to Data Format}
+\label{sec:proteus}
+
+% introducing the two problems (expressing data generally enough and 
+%running queries on multiple data formats)
+Data analysis requires combining information from numerous 
+heterogeneous datasets. For example, applications such as sensor data 
+management and decision support based on web click-streams involve 
+queries over data of varying models and formats. 
+To support analysis workloads over heterogeneous datasets, 
+practitioners are left with two alternatives: 
+a) use a database engine that supports multiple operations 
+\cite{onesize_fitsall}, %, but this approach  is expensive. Database 
+%engines are typically generic and hard to 
+%optimize for all cases. 
+or b) execute their analysis over dedicated, specialized systems for each of their applications~\cite{xml_to_relational}. 
+The first approach might hurt performance for scenarios involving 
+non-relational data, but allows for extensive functionality and 
+expressiveness. The second approach 
+requires using multiple tools, as well as writing custom scripts to 
+combine the results. Hence, performing analysis effortlessly and 
+efficiently is challenging.
+
+We present an approach that bridges the 
+conflicting requirements for flexibility and performance when analyzing data of various formats. 
+We achieve that by combining an optimizable query 
+algebra, richer than the relational one, with on-demand adaptation 
+techniques to eliminate numerous query execution overheads.
+
+% algebra
+\subsection{An Expressive Query Algebra}
+To support queries over heterogeneous data, we need a query algebra that 
+treats all supported data types as first-class citizens in terms of 
+both expressive power and optimization capabilities.
+Specifically, our approach is based on the monoid comprehension 
+calculus~\cite{monoids}. A monoid is an algebraic construct term 
+stemming from category theory which can be used to capture operations between both
+primitive and collection data types. Therefore, monoids are a natural
+fit for querying various data formats because they support operations over several data 
+collections (e.g., bags, sets, lists, arrays) and arbitrary nestings 
+of them. 
+%
+
+The monoid calculus provides the expressive power to manipulate different
+data formats, and optimizes the resulting queries in a uniform way. First, the monoid
+calculus allows transformations across data models by translating them
+into operations over different types of collections, hence we can produce 
+multiple types of output. The calculus is also expressive enough for 
+other query languages to be mapped to it as syntactic sugar: For 
+relational queries over flat data (e.g., binary and CSV files), our 
+design supports SQL statements, which it translates to 
+comprehensions. Similarly, for XML data, XQuery expressions can be
+translated into our internal algebra.
+%
+Thus, monoid comprehensions allow for powerful manipulations of complex data 
+as well as for queries over datasets 
+containing hierarchies and nested collections (e.g., JSON arrays).
+% step by step
+% step 1
+
+For each incoming query, the first step is mapping it into the internal language
+that is based on monoid comprehensions. 
+% re-write
+Then, the resulting monoid comprehension is rewritten to an algebraic plan of the 
+nested relational algebra~\cite{monoids}. This algebra resembles the 
+relational algebra, with the difference that it allows more complex operators, which 
+are applicable over hierarchical data. For example, apart from the
+relational operators, such as selection and join, it provides
+the unnest and outer unnest operators which ``unroll" a collection
+field path that is nested within an object. Therefore, the
+logical query plan allows for optimizations that combine the aforementioned operators.
+
+The optimizer is responsible for performing the query rewriting and the conversion 
+of a logical to a physical query plan. To apply the optimizations, the optimizer
+takes into consideration both the existence of hierarchical data, as well as
+that the queries might be complex, containing multiple nestings.
+Therefore, the optimization involves a normalization algorithm \cite{monoids} 
+which transforms the comprehension into a ``canonical'' form. The normalization 
+also applies a series of optimization rewrites. Specifically, 
+it applies filter pushdown and operator fusion. In addition, it
+flattens multiple types of nested comprehensions. Thus, using the normalization
+process, the comprehension is mapped to an expression that allows efficient
+query execution.
+
+The monoid comprehension calculus
+is a rich model, and therefore incurs extra complexity. The more complex an algebra 
+is, the harder it becomes to evaluate queries efficiently: Dealing 
+with complex data leads to complex operators, sophisticated yet 
+inefficient storage layouts, and costly pointer chasing during query 
+evaluation. To overcome all previous limitations, we couple a broad 
+algebra with on-demand customization.
+
+% engine
+\subsection{Query Engines On-Demand}
+%The presented algebra allows combining data of heterogeneous models 
+%and produces data-model-conscious query plans. 
+%However, having a rich model and algebra incurs extra complexity.
+%The more complex an algebra is in terms of expressive power, the 
+%harder it becomes to evaluate queries efficiently: Dealing 
+%with complex data leads to complex operators, sophisticated yet 
+%inefficient storage layouts, and costly pointer chasing during query 
+%evaluation. To overcome all previous limitations, we couple a broad 
+%algebra with on-demand customization.
+
+%
+We couple this powerful query algebra with on-demand adaptation 
+techniques to eliminate the query execution overheads stemming from
+the complex operators. For analytical queries over flat (e.g., CSV) 
+data, the system must behave as a relational system. 
+Similarly, for hierarchical data, it must be as fast as a document store.
+Specifically, our design is modular, with each of the modules using a 
+code generation mechanism to customize the overall system across a 
+different axis. 
+
+%
+First, to overcome the complexity of the broad algebra,we avoid the 
+use of general-purpose abstract operators. Instead, we dynamically 
+create an optimized engine implementation per query using code 
+generation. Specifically, using code generation, we avoid the 
+interpretation overhead by traversing the query plan only once and 
+generating a custom implementation of every visited operator.  
+Once all plan operators have been visited, the system can produce 
+a hard-coded query engine implementation which is expressed in machine code.
+
+%
+To treat all supported data formats as native storage,  we 
+customize the data access layer of the system based on the underlying 
+data format while executing the query. Specifically, we mask the details of the underlying 
+data values from the
+query operators and the expression generators. To interpret data
+values and generate code evaluating algebraic expressions, we use 
+input plug-ins where each input plug-in is responsible for generating data 
+access primitives for a specific file format. 
+
+
+%
+Finally, to utilize the storage that better fits the current workload, 
+we materialize in-memory caches and treat them as an extra input. The 
+shape of each cache is specified at query time, based on the format of
+the data that the query accesses. 
+We trigger cache creation i) implicitly, as a by-product of an 
+operator's work, or ii) explicitly, by introducing caching operators 
+in the query plan. Implicit caching exploits the fact that
+some operators materialize their inputs: nest and join are
+blocking and do not pipeline data. Explicit caching places buffering operators at any
+point in the query plan. An explicit caching operator calls an output 
+plug-in to populate a memory block with data. Then, it passes
+control to its parent operator. Creating a cache adds an overhead to
+the current query, but it can also benefit the overall query workload.
+
+Our design combines i) an expressive query algebra which masks data 
+heterogeneity with ii) on-demand customization mechanisms which produce a specialized
+implementation per query. Based on this design, we build Proteus,
+a query engine that natively supports different data formats, and specializes 
+its entire architecture to each query and the data that it touches 
+via code generation. Proteus also customizes
+its caching component, specifying at query time how these caches
+should be shaped to better fit the overall workload.
+
+%Overall, the originally 
+%distinct modules collapse into a unified, specialized query engine at 
+%runtime. 
+% shall I drop this?
+%We validate our design by building Proteus, an analytical query 
+%engine that queries heterogeneous datasets without converting them to 
+%a homogeneous form. Proteus couples a general query interface with 
+%the execution times of a system that has been specialized for a 
+%specific query, data, and workload instance. Proteus currently 
+%supports CSV, JSON, and relational binary data. Its modularity makes 
+%it extensible; adding support for more formats is straightforward.
