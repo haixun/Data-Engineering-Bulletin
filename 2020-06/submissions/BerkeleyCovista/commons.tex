@@ -1,0 +1,287 @@
+\section{Covid Commons: Unified Contact Tracing With Many Apps}
+\label{sec:commons}
+
+% \gabe{this "intro" covers background that should hopefully be established by this point in the paper}
+
+Standardizing on an exposure notification protocol such as AGEN is crucial to achieving the critical mass of participation required to make such an approach effective (estimated to be at least 80\% for a city of 1 million individuals~\cite{hinch2020effective}) and privacy preserving.
+Apple and Google, as producers of the two dominant smartphone OSes, are uniquely positioned to bring these capabilities to nearly every smartphone and have engineered the AGEN protocol to that end.
+Providing an implementation of the protocol through an OS upgrade would eliminate the fragmentation of the protocol preventing sufficient adoption.
+However, standardizing the proximity detection protocol is just part of the solution.
+
+Due to concerns over potential misuse of the capabilities of the proximity detection protocol and location tracking features of modern smartphones, Apple and Google have announced that access to the SDK for AGEN to ``public health agencies"~\cite{agen_pha_announce}.
+The realization of this policy has evolved to essentially mean ``one app per state."
+Centralizing the apps around state governments means that tracing efforts are not limited to local jurisdictional boundaries. 
+However, the public health authorities responsible for testing and tracing often operate at a more local level~\cite{bay_area_testing, local_testing_sites}.
+
+% despite the decentralized nature of the protocol represents the tension between the centralized, location-based manual contact tracing methods traditionally used by governments and public health agencies and the decentralized and privacy-preserving methods developed in academia and industry.
+
+% \gabe{what terminology are we using throughout the paper? exposure/diagnosis keys, etc}
+% \joey{We need to udpate the background section to have all of our terminology.}
+The fundamental issue with this policy is a failure to distinguish between ownership of the required repository of ``diagnosis keys'' and the applications that produce and utilize them.
+The repository contains keys that correspond to times when diagnosed individuals may have interacted with others and must therefore be public-facing so that individuals, via AGEN-compatible apps, can download the keys and determine their own exposure risk.
+The keys uploaded to the repository must be limited to those that have been authorized by a public health authority through some testing and interview process.
+In the U.S., public health measures such as contact tracing and case reporting are carried out at a county or city level through individually executed processes, in coordination with state and national law and policy.
+However, health authorities do not generally have the technical, human or financial resources to produce the required app and also stand up and maintain such a public-facing data service.
+This is even less tenable during a pandemic, when such resources are already strained.
+Who, then, manages the AGEN backend needed to share Report Keys?
+
+The worst-case scenario is for the repositories to emerge as fragmented silos of diagnosis keys.
+In the midst of the custody battle over administration of the emerging technical approaches to the contact tracing problem, it is important to remember that exposure does not respect administrative boundaries.
+Regardless of how the repository is established, it is essential that exposure notification can be transmitted across backends and across apps.
+Indeed, there are already efforts to combine contact tracing efforts and data across the administrative boundaries established by industry's policy around AGEN~\cite{tri_state_coalition}.
+
+\subsection{A Path to Nation-scale Data}
+
+A solution to this issue is the creation of a privacy-preserving data exchange shared and accessible across apps and administrative boundaries --- a Commons.
+Different public health authorities could cooperatively contribute to the Commons and individuals across many jurisdictions would access it through their apps.
+Such a Commons might operate at the scale of one per nation, or it might be regional with some form of federation to share keys and exposure information across individual instances.
+The Commons may be hosted and maintained by governmental authorities, foundations or other appropriate institutional entities.
+
+The Commons requires no change to the EN protocols.
+Each individual participates in the proximity detection using daily TEKs and the RPIs generated from them without change.
+With no other information leaving the phone, the app on an indivual phone downloads the diagnosis keys and presents them to the SDK to obtain exposure risk scores.
+The difference is that those diagnosis keys are not \emph{a priori} limited to the ones produced by users of the same app.
+Just as in the current decentralized protocol, an individual who tests positive --- i.e. a confirmed case --- and participates in contact tracing with a specific public health authority is asked to voluntarily submit their TEKs for the past period over which they are likely to have been contagious.
+The AGEN protocol does not stipulate how that request is formulated or how that submission is performed, but the introduction of the Commons allows us to answer that question precisely.
+
+\subsection{The PHA Experience: Federating Access to the Commons}
+
+A Commons is utilized by a well-defined set of public health authorities that are registered with it.
+Professionals at PHAs can authenticate to and access the Commons using well-established authentication techniques such as LDAP and OAuth.
+As part of requesting a patient to submit their diagnosis keys to the Commons, the professional requests a one-time authorization (OTA) from the Commons.
+The OTA authorizes the upload of TEKs corresponding to the extent of time during which the patient is likely to have been contagious; this will involve some days prior to the diagnosis and extend to several days or weeks following.
+The OTA is provided to the patient to authorize the submission of their keys to the Commons; the upload is opt-in, as under the usual AGEN protocol.
+
+Because the OTA corresponds to a single interaction between a healthcare professional and a patient, it is a natural key on which helpful metadata can be associated.
+The authorizing PHA may want their identity to be associated with the submitted diagnosis keys so that the provenance of the diagnosis is preserved.
+This identity, realized by the TLS public key of the PHA, can be associated with generated OTAs in the Commons.
+This provides no more information than having each PHA host their own exposure key store, as currently envisioned.
+As we will discuss below, the PHA identity can also be used to filter which diagnosis keys are considered in the matching process on an individual's phone.
+
+The OTA itself is also a useful piece of metadata when associated with the uploaded keys in the Commons.
+The authorizing professional will likely want to be able to determine whether the patient has in fact contributed their keys as requested to determine if follow-up is necessary.
+Associating the OTA with the uploaded keys places no new information in the Commons: the professional knows what they know about those they interview and they know what authorizations they have requested.
+Each such confirmed case can be expected to have generated some authorization request, but that information, along with all other aspects of the contact tracing process, is under the purview of the PHA.
+Counts of confirmed cases and other aggregate information are already regularly reported to the public.
+% They report counts of confirmed cases and various other information to the public.
+
+The Commons is able to provide this functionality despite no patient data --- indeed, no health or medical data of any kind --- ever being entered into the Commons.
+The Commons also takes no position on which parts of the contact tracing process are automated and which are manual.
+It integrates cleanly with the existing processes established by PHAs for interviewing patients, deciding which diagnosis keys are appropiate to share, and so on.
+The Commons merely provides a means of carrying out the result of these decisions in a way that does not require individuals to be using the same phone app.
+
+\subsection{The User Experience: Federating Downloads from the Commons}
+
+\gabe{How much do we want to say here?}
+
+The current draft of the AGEN protocol says very little about how exposure notification information will be transmitted or relayed among the different instances of the diagnosis key repository.
+A unified Commons immediately addresses this issue --- all diagnosis keys are uploaded and downloaded from the shared repository.
+However, under a federated regime, it is necessary to address how exposure notification and uploaded keys can be routed across instances of the Commons.
+
+Consider a scenario where an individual is diagnosed by one PHA but may travel or may have traveled to regions covered by different PHAs.
+Individuals in those other regions should be able to obtain the TEKs for the diagnosed individual, even though the diagnosis was performed by a remote PHA.
+There are two complementary approaches.
+
+The first approach proactively forwards diagnosis keys to relevant PHAs.
+A PHA professional can ``tag'' a requested OTA with public keys or other metadata identifying relevant remote PHAs, using information acquired as part of the interaction with the individual.
+The process of uploading diagnosis keys authorized by that OTA to the Commons can then incorporate a simple forwarding mechanism that replicates those keys to the federated instances of the Commons managed by those other PHAs.
+This can be performed by the Commons itself, or it may be performed on an opt-in basis by the individual.
+
+Under the second approach, individuals may proactively request diagnosis key downloads from federated instances of the Commons they are interested in.
+An individual may subscribe to diagnosis key downloads for Commons covering regions the individual has travelled to or will travel to.
+Additionally, an individual may subscribe to Commons for surrounding regions.
+
+Regardless of whether the Commons is realized as an administratively centralized server or a federated mesh, the Commons must provide some mechanism for filtering or scoping the download of diagnosis keys onto an individual's device.
+The number of keys downloaded from the Commons will grow with the adoption of AGEN-based apps, improvements in testing, and the spread of COVID-19.
+Without the ability to filter the set of keys down to a reasonable and relevant set that is still large enough to maintain the privacy-preserving properties of AGEN, the bandwidth requirements and compute requirements (for deriving the thousands of RPIs used for the matching process) may grow to be untenable.
+\joey{Can we do a small back of the envelope calculation here.}
+\gabe{in progress}
+
+\subsection{Extending the Commons}
+
+Once this basic separation of key repository has been established, along with the method for authorizing submissions and routing them to queries, it becomes possible to meaningfully entertain the question of including earlier stages. 
+Especially with testing being scarce, confirmation occurs late and involves the contact tracing processes of public health authorities.
+Prior to that stage, we have Probable Covid (where a diagnosis has been performed based on defined symptom criteria), preceded by Suspected Covid, and often preceded by individual state of concern. 
+Associated with each stage is a process, an (increasingly large) set of principals who might authorize a submission, and a reduced significance in conveying exposure.
+For example, the physician or health service making a Probable Covid diagnosis (and typically also authorizing testing) would be the natural principal to authorize the individual to submit “Probable Keys”. 
+The privacy-sensitive protocol could access these, as well as the “Confirmed Keys” referred to as Diagnosis Keys in the EN protocol. 
+The protocol permits the distinction to be reflected in metadata carried along with the keys. 
+Thus they might factor in, perhaps with lesser weight, into the risk score.
+
+% \begin{outline}
+% \0 Establish the issue:
+%     \1 traditional contact tracing measures require location, invade privacy
+%         \2 emergence of PS-MCT protocols
+%     \1 standardization of interoperable proximity detection protocol (AGEN) is vital to achieving critical mass of participation
+%         \2 need to avoid fragmentation of protocol
+%         \2 estimated to be at least 80\% in city of 1 million~\cite{hinch2020effective}
+%     \1 Apple/Google in unique position to bring PS-MCT capabilities to nearly every smartphone through OS upgrade
+%         \2 expose capabilities through SDK
+%         \2 requires a public facing data service to act as broadcast medium
+%     \1 2 main concerns w.r.t. AGEN protocol + SDK:
+%         \2 misuse of PS-MCT capabilities and information -- leads to limiting release of SDK to public health authorities
+%         \2 fragmentation of application -- only allow one contact tracing app per nation or per region
+%         \2 centralization of applications (1 per nation), despite decentralized protocol
+%    \1 fundamental issue is failure to distinguish between the repo of exposure keys and the the apps that produce/utilize them
+%        \2 in US, public health measures such as contact tracing and case reporting are carried out at county or city level in coordination with state and national law and policy
+%        \2 health authorities do not have technical, human or financial resources to produce and App and stand up/maintain a public facing data service
+%        \2 exposure does not respect administrative boundaries
+%            \3 regardless of how repo is established, must be able to transmit exposure notification across backends and across apps
+%            \3 tri-state contact tracing coalition (new york, new jersey, connecticut)
+%        \2 worst-case scenario is fragmented silos of exposure keys
+% \0 establish the solution
+%     \1 a Covid Commons -- exposure key database that PHAs cooperatively contribute to and individuals may access
+%         \2 can operate at scale of one per nation
+%         \2 can operate at smaller scale with some form of federation
+%         \2 maintained by govt authority, foundation, institutional entity
+% \0 Commons operation
+%     \1 how does Commons interact w/ existing PS-MCT protocols
+%         \2 the 'commons' fulfills the role of the 'server' in the AGEN protocol
+%         \2 upload exposure keys, subject to some authorization from PHA -- one-time auth key
+%     \1 how to federate
+%         \2 tag auth keys during interaction w/ PHA
+%         \2 individual subscribes to (local) PHA, plus other PHAs of interest
+% \end{outline}
+
+
+% However, interoperability of the protocol is only part of the story.
+
+
+\if 0
+\joey{The following is an overview from the position piece here
+\url{https://docs.google.com/document/d/1e4_mH7MMYO3bad9BoknrRlWR4jOcKNOFV8UyYLU5kPA/edit}}
+
+Apple/Google Position: An essential part of the companies’ position is to make this basic building block available on every phone and interoperable with all other phones regardless of the manufacturer, operating system, or choice of contact tracing App.
+This approach is critical to achieving the adoption needed for these techniques to work.
+Apple and Google are not building Apps themselves, instead they have opted to provide access to the APIs exclusively to national public health authorities and their software developers.
+The emphasis on directly engaging national public health authorities, rather than local authorities or private App developers, helps to avoid fragmentation of tracing efforts across local governments or Apps.
+If the anonymous publication of infected keys is only visible to other users of the same App and in the same region, it would not be possible to identify exposures to users who may have traveled from other regions or chose to install a competing App.
+
+Resolution - Commons: The critical point that Apple and Google missed is that the repository of infected keys needs to be provided in a common, interoperable manner just as does the proximity detection, independent of which App publishes the keys, which health authority handles the contact tracing of the confirmed case, which App accesses the published keys to determine an individual’s risk score, and which public health authorities serves that individual.
+Rather than “one app per nation”, a more effective position would be “one Temporary Exposure Key commons per nation”.  This would allow societal structures, rather than corporate policy, to determine how their App ecosystem should evolve.
+It is very likely that participation will be greatest if the Apps are available through organizations that individuals trust.  It might be on a city or county basis, a tribal organization, or a community health service.
+Such a Covid Commons fits naturally in the privacy-sensitive protocols that have been developed.
+When an individual tests positive, they conventionally engage in a contact tracing interview with a public health professional from an established organization, recognized by the Commons.
+As part of that interview process, the professional requests a one-time authorization for a set of keys to be contributed by the individual and gives that authorization code to them to enter into their app.
+On an opt-in basis, the key set is uploaded.
+In this manner, the public health professionals serve to protect the integrity of the information in the Commons without exposing any patient data or medical data.
+Their actions are quite similar to publishing counts of cases and demographic information, such as they do today.
+And, much as how that statistical data is aggregated today, the Commons provides a means of publication without a complex web of data sharing agreements.
+It might be hosted by governmental or NGO structures, based on national or regional policy.
+A diverse and innovative App ecosystem can grow to meet the needs of individuals and agencies.
+\fi
+
+\if 0
+\joey{full text from separate blog post}
+%% materials copied from here:
+%% https://docs.google.com/document/d/1CUhBwzPkc-iTMBRz1g7OSMb10mKL6Eyxu9o2qQS1UT4/edit
+
+For centuries public health efforts have used “contact tracing” to try to understand and contain the spread of epidemics.The diagnosed patient is interviewed to determine where they have been and who they have been with while contagious.
+The interviewer attempts to contact the exposed individuals to identify other cases (hopefully early) expanding the trace and learning of hot spots.
+In recent years, some governmental organizations have sought to amplify the reach and efficacy of such measures through surveillance means - cell phone locations or contacts, credit card records, video image processing, and such - raising serious civil liberties and individual privacy concerns, whether access to the information is voluntary or not.
+
+To address these concerns a new privacy sensitive alternative has emerged, privacy sensitive mobile contact tracing.
+It leverages standard hardware on modern smartphones to identify and anonymously shares notification of such potential exposures.
+Each phone generates a random key on a daily basis and, based on that key, produces a sequence of other seemingly random numbers throughout the day.
+Alone, this exchange of random numbers reveals no additional information to the owners of each phone.
+When a diagnosed person is interviewed, the public health authority can encourage and allow the patient to share the keys for their contagious period.
+Others can access these potential exposure keys, without any information leaving their phones, can compare the random numbers they would produce to ones that the phone has heard.
+If there is a strong enough match, the potentially exposed person can then seek guidance, reach out to their health service, request testing, or take other appropriate action.
+The health authority exposes no patient data and no health or medical data.
+In fact they do little more than what they do in reporting statistics on the cases they encounter.
+Yet citizens are able to learn of their individual potential exposure risk.
+
+In order for such exposure risk detection to work, not only must the matching operation be robust and meaningful, but a very large fraction of the population must participate.
+Its privacy protections are essential to that.
+Ordinary citizens should not be faced with the dilemma of having to give out personal information in order to learn of their exposure risk.
+Health and governmental organizations should not be faced with compromising patient privacy in conveying risks to the population.
+This privacy sensitive approach to exposure notification eliminates both barriers.
+
+In an astonishing step, Apple and Google joined forces to bring the building blocks of privacy sensitive contact tracing to essentially every smartphone with a routine operating system upgrade.
+They engaged with the research community to rapidly mature the low level detection mechanism (Bluetooth Low Energy beacons) and to ensure the cryptographic integrity of the privacy mechanisms.
+They recognized the separation of the operating system level service, which performs the cryptography, generates and listens to beacons, and translates matches to a risk score, from “the App”, which provides the user experience and connects the use of this technological mechanism with the professional processes of a local health authority.
+
+
+Unfortunately, the path that industry, governments, and public health authorities are currently pursuing in the use of this promising approach, despite good intentions, may undermine its potential.
+Fearing misuse of these capabilities, the companies announced that they would only release the software development kit (SDK) for Exposure Notification to “public health authorities”.
+In the United States, public health measures, especially contact tracing and case reporting, are carried out at the County or City level, in coordination with State and National law and policy.
+To have each such health authority produce an App, stand up a public facing data service, and support its operation is untenable.
+They generally do not have the technical, human or financial resources to do so, even in the best of times, much less during the incredible crush of the pandemic.
+But, even if coordinated industry, state, and federal support could overcome those barriers, the worst path is to produce many distinct silos, fragmenting the pool of exposure keys, be that by County, by App, by platform or any other dividing line.
+Covid-19 does not conform to such administrative or political boundaries.
+
+The individual public health authorities do each have their own processes, and they are the appropriate ones to authorize individuals to share their keys, but those keys should be held in common where any potentially exposed person can detect the risks, regardless of County of residence.
+
+Concerns about fragmentation may have prompted the companies to take the unprecedented further step, effectively dictating public health policy, of announcing that they will allow only one contact tracing App per nation to be developed or possibly one per region.
+(Specifics of what had been expressed in the new reports have now appeared.)
+Interestingly, having faced considerable pressure from certain countries pursuing a centralized approach, rather than a decentralized one, the companies have stood very firm on the decentralized approach but then sought to centralize the Apps.
+
+The fundamental problem here is a failure to recognize the critical distinction between the repository of exposure keys and the Apps that produce and utilize them.
+We need to avoid fragmentation and misuse of the repository, regardless of the intended coverage and customization of the Apps.
+We see this need reflected in the formation of efforts like the Tri-state Contact Tracing coalition (New York, New Jersey, Connecticut).
+
+The alternative approach would be to create a Covid Commons that many public health authorities cooperatively contribute to and that individuals across those jurisdictions access through their Apps.
+Such a Commons could well operate at the scale of one per nation.
+Or, it might be regional, with some form of federation.
+It might be hosted by a governmental authority, a foundation, or other appropriate institutional entity.
+
+The concept of such a Commons requires no change to the PACT protocol or its Exposure Notification realization.
+Each individual participates in BLE proximity detection using daily Temporary Exposure Keys (TEKs) and Rolling Proximity Identifier (RPIs) generated from them without change.
+With no other information leaving the phone, the App on the individual phone downloads Diagnosis Keys and presents them to the Exposure Notification SDK to obtain exposure risk scores.
+The difference is that those Diagnosis Keys are not a priori limited to the ones produced by users of the same App.
+
+Just as in the current decentralized protocol, an individual who tests positive, i.e., a confirmed case, and participates in contact tracing with a specific public health authority is asked, or requested, to submit their TEKs for the past period over which they are likely to have been contagious.
+
+The Exposure Notification protocol does not stipulate how that request is formulated or how that submission is performed.
+The introduction of the Covid Commons allows us to answer that question precisely.
+A Commons is utilized by a well-defined set of public health authorities that are registered with it.
+Using well-established authentication techniques, the professional at such a PHA can authenticate to and access the Commons.
+The action that the professional takes is to request a one-time authorization (OTA) as part of handling a confirmed case.
+As part of requesting the patient to submit their Diagnosis Keys, the professional provides the OTA to that individual.
+The individual accepts the authorization through their App in as part of submitting those keys.
+
+It is likely that the authorizing PHA would want to have their identity (concretely their TLS Public Key) with the submitted Diagnosis Keys.
+This provides no more information than having each PHA host their own exposure key store, as currently envisioned.
+Such designations might be used in filtering the keys that are considered for matching.
+
+It is also likely that the authorizing professional might want to be able to determine whether their patient has in fact contributed exposure keys as requested, perhaps to follow up if not.
+This places no new information in the Commons.
+The professional knows what they know about those they interview, they know what authorizations they have requested.
+They report counts of confirmed cases and various other information to the public.
+Each such confirmed case can be expected to have generated some authorization request, but that information, along with all other aspects of the contact tracing process, is under the purview of the PHA.
+
+No patient data is entered into the commons.
+No health or medical data is entered into it.
+In fact, the PHA enters no data into the commons.
+But they do have a crucial role.
+They are who authorizes an individual to enter specific data into it - via their App.
+They are who ensures that the Diagnostic Keys used by individuals to assess their own risk have appropriate integrity.
+
+The introduction of the Commons places no position of which parts of the contact tracing process is automated and which are manual.
+The PHA has their own processes for interviewing patients, deciding what Diagnostic Keys are appropriate to share, and so on.
+The Commons merely provides a means of carrying out the result of their decisions.
+They request a one-time authorization for certain days and they provide it to a certain individual.
+How they proceed following that action is entirely according to their particular processes.
+Separating off this common key store from the App solves the fragmentation problem.
+This separation serves much as does separating proximity detection from the App.
+Two individuals do not have to be using the same App in order to appropriately convey risk.
+The PHA handling the case determines what gets entered into its store, preserving its integrity.
+The low-level BLE proximity detection and the high-level exposure store are both infrastructure that enables the Apps.
+They allow an ecosystem of potentially distinct Apps to coexist effectively.
+
+Corporations may have many reasons why they might want to limit the number of groups developing upon one of its products, including limited resources.  But these are business concerns, resolvable by business means.  The issues for the rest of society are participation, privacy, and efficacy.  These are the essential basis for determining how the App ecosystem should evolve.
+
+Once the Commons (and the proximity) detection are separated from the App and made interoperable, a strong argument can be made for Apps that are tailored for the community they serve.  This may be the strongest reason for having local health authorities “provide” the App - by which we mean they shape the user experience, not that each PHA becomes an App developer.  But they should be able to skin it, brand it, and tailor it to their processes. Personal privacy is critical for participation, and so is trust.  It is easy to imagine that a person will be more likely to use an App if it is associated with the local entity that is providing testing, support, guidelines, etc.  The entity they trust.  The App can bring value to the individual beyond the detection of risks (which we hope is rare) and submission of keys (if so unfortunate as to be diagnosed positive), it can provide current local information that is useful everyday.  And, if they do experience risk, rather than just a vague score and perhaps a contact of a state or national level service, it can provide specific guidance relevant to the processes of the local public health authority, health services, testing capacities, and so on.  It can be tailored and actionable.
+
+It is useful to look separately at the two kinds of engagements with Exposure Notification.  Take first the case where an individual has been confirmed and is involved in the contact tracing process.  That process is carried out by an organization according to a particular flow.  Does the individual prepare materials in advance of the interview, during or after?  How are questions asked and follow-up performed?  At what points in this process are what sorts of information provided?  If the technology for privacy-sensitive mobile contact tracing is going to improve the efficiency and efficacy of that contact tracing process, it should be responsive to that process, rather than dictate some other process that might seem to fit the technology.  The ability to customize and tailor would seem to be critical to efficacy, as well as participation.
+
+The confirmed case is sourced from a particular institutional authority.  Thus, it is natural for that authority to authorize its inclusion and potentially make an effort to encourage its submission.  And to some extent it reflects where to consider for exposure. Often, confirmed and exposed individuals will be part of the same community and share the institutional authority.  But not entirely.  A person may live in one county but work or go to school in another.  The individual assessing their exposure risk knows where they have been and they might configure their app to include the PHAs for those places.  (Even with very crude location determination, this might be done automatically.) Accessing those is straightforward with a Commons (just a filter) but could be accomplished even with a directory of the many distinct stores (if they all used a standard access method).  But the confirmed individual may have reported in some institutional jurisdiction other than that where the exposure occurred.
+
+Instead, the federation of data may be better driven from the source entity.  In the interview process the health professional obtains knowledge of what areas the confirmed patient has occupied while contagious.  So in requesting the OTA it is natural to provide indication of potentially affected areas, along with the authorized dates of keys.  When the Diagnosis Keys are submitted, they can be included in the exposure requests where there is potential exposure.
+
+Once this basic separation of key repository has been established, along with the method for authorizing submissions and routing them to queries, it becomes possible to meaningfully entertain the question of including earlier stages.  Especially with testing being scarce, confirmation occurs late and involves the contact tracing processes of public health authorities. Prior to that stage, we have Probable Covid (where a diagnosis has been performed based on defined symptom criteria), preceded by Suspected Covid, and often preceded by individual state of concern.  Associated with each stage is a process, an (increasingly large) set of principals who might authorize a submission, and a reduced significance in conveying exposure. For example, the doctor or health service making a Probable Covid diagnosis (and typically also authorizing testing) would be the natural principal to authorize the individual to submit “Probable Keys”.  The privacy-sensitive protocol could access these, as well as the “Confirmed Keys” referred to as Diagnosis Keys in the EN protocol.  The protocol permits the distinction to be reflected in metadata carried along with the keys.  Thus they might factor in, perhaps with lesser weight, into the risk score.
+\fi
+
+
+
+
