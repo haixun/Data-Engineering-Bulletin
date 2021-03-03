@@ -1,0 +1,238 @@
+\documentclass[11pt]{article}
+
+
+\usepackage{deauthor,times,graphicx}
+\usepackage{xspace}
+\usepackage{xcolor}
+
+\usepackage{url}
+
+
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{caption}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\topic}[1]{\vspace{0.25em}\noindent\textbf{#1.}}
+
+\definecolor{ao}{rgb}{0.0, 0.5, 0.0}
+
+\newcommand{\todo}[1]{\textcolor{red}{TODO: #1}}
+\newcommand{\dorx}[1]{\textcolor{purple}{(dorx: #1)}}
+\newcommand{\dorxt}[1]{\textcolor{purple}{#1}}
+\newcommand{\old}[1]{{\leavevmode\color{brown}#1}}
+\newcommand{\yifan}[1]{\textcolor{blue}{#1}}
+\newcommand{\yifanc}[1]{\textcolor{blue}{(yf:#1)}}
+\newcommand{\dt}[1]{\textcolor{ao}{#1}}
+\newcommand{\dtc}[1]{\textcolor{red}{[DT:#1]}}
+\newcommand{\stitle}[1]{\noindent{\bf #1}}
+
+\newcommand{\blah}[1]{\textcolor{red}{blah}}
+
+\newcommand{\thinktime}[0]{think time\xspace}
+\newcommand{\Thinktime}[0]{Think time\xspace}
+
+\begin{document}
+
+\title{Enhancing the Interactivity of Dataframe Queries \\ by Leveraging Think Time}
+
+\author{Doris Xin, Devin Petersohn, Dixin Tang, Yifan Wu, Joseph E. Gonzalez, \\ Joseph M. Hellerstein, Anthony D. Joseph, Aditya G. Parameswaran \\ UC Berkeley}
+
+
+\maketitle
+
+\section{Introduction}
+
+\input{submissions/interactivity/s1.intro}
+
+\section{Background and Motivation}
+
+\subsection{Key Concepts}
+\input{submissions/interactivity/s2.1.terminology}
+
+\subsection{Motivating Scenarios and Example Optimizations}
+\label{sec:tasks}
+\input{submissions/interactivity/s2.2.example_opts}
+
+\section{Assessment of Opportunities with Notebook Execution Traces}
+\label{sec:formative}
+\input{submissions/interactivity/s3.notebook_eval}
+
+\section{System Architecture}
+\label{sec:arch}
+\input{submissions/interactivity/s4.architecture}
+
+\section{Optimization Framework}
+\label{sec:opt}
+\input{submissions/interactivity/s5.opt}
+
+\newpage
+
+\section{Case Study}
+
+\begin{figure}
+    \centering
+         \centering
+         \includegraphics[width=\textwidth]{submissions/interactivity/figures/case_study_before.pdf}
+         \caption{
+         An example notebook. Cells that show an output are indicated with a red box.
+         }
+         \label{fig:case_study_before}
+\end{figure}
+
+In this section, we evaluate how opportunistic evaluation will impact the end user
+through a case study. Figure~\ref{fig:case_study_before} shows an excerpt from
+the original notebook, taken from a Kaggle competition (https://www.kaggle.com/c/home-credit-default-risk). 
+
+In this case study, the data scientist first read in the file, and was forced to immediately
+wait. Then, the user wanted to see the columns that exist in the dataset. This is
+often done when the data scientist first encounters a dataset. They therefore
+printed the first 5 lines with \code{data.head()}. This inspection is important for
+data validation: the data scientist wanted to ensure that the data was parsed
+correctly during data ingestion. After these two data validation steps, the data scientist
+noticed that there were a significant number of \code{null} values in multiple
+columns. 
+
+The cell labeled \code{In[4]}
+shows
+how the data scientist solved the \code{null} values problem: they decided to drop any
+column that does not have at least 80\% of its values present. Notice
+that the data scientist first wanted to see what the results of the query
+would look like before they executed it, so
+they added a \code{.head()} to the end of the query that drops the columns.
+Likely this was done during debugging, where many different, but similar queries
+were attempted until the desired output was achieved. The query was then
+repeated to overwrite the \code{data} variable. An important note here is that
+the full dataset is lost at this point due to the overwriting of the \code{data}
+variable. The data scientist will need to reread the file if they want access to 
+the full dataset again. After dropping columns with less than 80\% of their values
+present, the data scientist
+double-checked their work by inspecting the \code{columns} of the overwritten
+\code{data} dataframe.
+Next, we evaluate the benefits of the opportunistic evaluation approach by determining the amount of
+synchronous wait time saved by leveraging \thinktime.
+
+
+To evaluate opportunistic evaluation in our case study, \thinktime was injected into
+the notebook from the distribution presented in Figure~\ref{fig:think}.
+We found that the time that the hypothetical data scientist spent waiting on computation was
+almost none: the \code{read\_csv} phase took 18.5 seconds originally, but since
+the output of the \code{columns} and \code{head} were prioritized, they were
+displayed almost immediately (122ms). The data scientist then looked at the
+two outputs from \code{columns} and \code{head} for a combined 16.2 seconds.
+This means the data scientist synchronously waited on the \code{read\_csv} for approximately
+1.3 seconds. Next, the user had to wait another 2.3 seconds for the columns
+with less than 80\% of their values present to be dropped. Without opportunistic
+evaluation, the user would have to pay this time twice, once to see the first
+5 lines with \code{head} and again to see the \code{data.columns} output in 
+cell \code{In[6]}. 
+
+
+\section{Related Work}
+\input{submissions/interactivity/rw}
+
+\section{Conclusion \& Future Work}
+We proposed opportunistic evaluation, a framework for accelerating interactions with dataframes. Interactive latency is critical for iterative, human-in-the-loop dataframe workloads for supporting data validation, both for ML and for EDA. Opportunistic evaluation significantly reduces interactive latency by 1) prioritizing computation directly relevant to the interactions and 2) leveraging \thinktime for asynchronous background computation for non-critical operators that might be relevant to future interactions. We have shown, through empirical analysis, that current user behavior presents ample opportunities for optimization, and the solutions we propose effectively harness such opportunities. 
+
+While opportunistic evaluation addresses data validation prior to model training, data validation challenges are present in other parts of the end-to-end ML workflow. For example, after a trained model has been deployed, it is crucial to monitor and validate online data against the training data in order to detect data drift, both in terms of distribution shift and schema changes. A common practice to address data drift is to retrain the model on newly observed data, thus introducing data drift into the data pre-processing stage of the end-to-end ML workflow. Being able to adapt the data validation steps in a continuous deployment setting to unexpected data changes is an open challenge.
+
+%\bibliographystyle{abbrv}
+%{\small
+%\bibliography{submissions/interactivity/main.bib}
+%}
+
+\begin{thebibliography}{10}
+
+\bibitem{colab}
+{Google Colab}.
+\newblock \url{colab.research.google.com}.
+
+\bibitem{sparksql-func}
+{PySpark 2.4.4 Documentation: pyspark.sql module}.
+\newblock
+  \url{http://spark.apache.org/docs/latest/api/python/pyspark.sql.html#module-pyspark.sql.functions}.
+
+\bibitem{Dask}
+{Dask Documentation}.
+\newblock \url{https://docs.dask.org/en/latest/}, 2020.
+
+\bibitem{pandas-opt}
+{Enhancing performance, Pandas Documentation}.
+\newblock \url{https://pandas.pydata.org/pandas-docs/stable/
+  user_guide/enhancingperf.html}, 2020.
+
+\bibitem{koalas}
+{Koalas: pandas api on apache spark}.
+\newblock \url{https://koalas.readthedocs.io/en/latest/}, 2020.
+
+\bibitem{Modin}
+{Modin Documentation}.
+\newblock \url{https://modin.readthedocs.io/en/latest/}, 2020.
+
+\bibitem{pandas-api}
+{Pandas API reference}.
+\newblock
+  \url{https://pandas.pydata.org/pandas-docs/stable/reference/index.html},
+  2020.
+
+\bibitem{cooper2011engineering}
+K.~Cooper and L.~Torczon.
+\newblock {\em Engineering a compiler}.
+\newblock Elsevier, 2011.
+
+\bibitem{hagedornputting}
+S.~Hagedorn, S.~Kl{\"a}be, and K.-U. Sattler.
+\newblock Putting pandas in a box.
+\newblock {\em The Conference on Innovative Data Systems Research (CIDR)}.
+
+\bibitem{hellerstein2007architecture}
+J.~M. Hellerstein, M.~Stonebraker, J.~Hamilton, et~al.
+\newblock Architecture of a database system.
+\newblock {\em Foundations and Trends{\textregistered} in Databases},
+  1(2):141--259, 2007.
+
+\bibitem{jindalmagpie}
+A.~Jindal, K.~V. Emani, M.~Daum, O.~Poppe, B.~Haynes, A.~Pavlenko, A.~Gupta,
+  K.~Ramachandra, C.~Curino, A.~Mueller, et~al.
+\newblock Magpie: Python at speed and scale using cloud backends.
+\newblock {\em The Conference on Innovative Data Systems Research (CIDR)}.
+
+\bibitem{kluyver2016jupyter}
+T.~Kluyver, B.~Ragan-Kelley, F.~P{\'e}rez, B.~E. Granger, M.~Bussonnier,
+  J.~Frederic, K.~Kelley, J.~B. Hamrick, J.~Grout, S.~Corlay, et~al.
+\newblock Jupyter notebooks-a publishing format for reproducible computational
+  workflows.
+\newblock In {\em ELPUB}, pages 87--90, 2016.
+
+\bibitem{mackefine}
+S.~Macke, H.~Gong, D.~J.-L. Lee, A.~Head, D.~Xin, and A.~Parameswaran.
+\newblock Fine-grained lineage for safer notebook interactions.
+\newblock {\em Proceedings of the VLDB Endowment}, 2021.
+
+\bibitem{petersohn13towards}
+D.~Petersohn, S.~Macke, D.~Xin, W.~Ma, D.~Lee, X.~Mo, J.~E. Gonzalez, J.~M.
+  Hellerstein, A.~D. Joseph, and A.~Parameswaran.
+\newblock Towards scalable dataframe systems.
+\newblock {\em Proceedings of the VLDB Endowment}, 13(11).
+
+\bibitem{sinthong2019aframe}
+P.~Sinthong and M.~J. Carey.
+\newblock Aframe: Extending dataframes for large-scale modern data analysis.
+\newblock In {\em 2019 IEEE International Conference on Big Data (Big Data)},
+  pages 359--371. IEEE, 2019.
+
+\bibitem{sioulasaccelerating}
+P.~Sioulas, V.~Sanca, I.~Mytilinis, and A.~Ailamaki.
+\newblock Accelerating complex analytics using speculation.
+\newblock {\em The Conference on Innovative Data Systems Research (CIDR)}.
+
+\bibitem{yan2020auto}
+C.~Yan and Y.~He.
+\newblock Auto-suggest: Learning-to-recommend data preparation steps using data
+  science notebooks.
+\newblock In {\em Proceedings of the 2020 ACM SIGMOD International Conference
+  on Management of Data}, pages 1539--1554, 2020.
+
+\end{thebibliography}
+
+\end{document}

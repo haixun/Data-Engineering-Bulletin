@@ -1,0 +1,121 @@
+The opportunistic evaluation framework optimizes for interactive latency by deferring to \thinktime the execution of operators that do not support interactions. The previous section describes how we use simple program analysis to identify the interaction critical path that must be executed to produce the results for an interaction. In this section, we discuss optimizations for minimizing the latency of a given interaction in Section~\ref{sec:critical} and optimizations for minimizing the latency of future interactions by leveraging \thinktime in Section~\ref{sec:non-critical}. We discuss how to model user behavior to anticipate future interactions in Section~\ref{sec:user}.
+
+
+\subsection{Optimizing Current Interactions}
+\label{sec:critical}
+
+Given an interaction critical path, we can apply standard database optimizations for single queries to optimize interactive latency. For example, if the interaction operator is \code{head} (i.e., examining the first $K$ rows), we can perform predicate pushdown to compute only part of the interaction critical path that leads to the top $K$ rows in the final dataframe. The rest can be computed during \thinktime in anticipation of future interactions. 
+
+
+The main challenge for optimizing interactive latency in opportunistic evaluation is the ability to effectively preempt the execution of non-critical operators. This preemption ensures that we avoid increasing the interactive latency due to irrelevant computation. 
+The current implementation of various operators within pandas and other dataframe libraries often involves calling lower-level libraries that cannot be interrupted during their execution. In such cases, the only way to preempt non-critical operators is to abort their execution completely, potentially wasting a great deal of progress. We propose to overcome this challenge by partitioning the dataframe so that preemptions lead to, in the worst case scenario, only loss of the progress on the current partition.
+
+\topic{Dataframe partitioning}
+Partitioning the dataframe in the opportunistic evaluation setting involves navigating the trade-off between the increase in future interactive latencies due to loss of progress during preemption and the reduction in operator latency due to missed holistic optimizations on the entire dataframe. In the setting where interactions are sparse, a single partition maximizes the benefit of holistic optimization while losing progress on the entire operator only occasionally due to preemption. On the other hand, if interactions are frequent and erratic, a large number of small partitions ensures progress checkpointing, at the expense of longer total execution time across all partitions. Thus, the optimal partitioning strategy is highly dependent on user behavior. We discuss how to model user behavior in Section~\ref{sec:user}.
+
+\newpage
+Without a high-fidelity user interaction model, we can create unevenly sized partitions to handle the variability in the arrival rate of interactions. First, we create small partitions for the top and bottom $K$ rows in the dataframe not only to handle the rapid succession of interactions but also to support partial-result queries involving \code{head} and \code{tail} that are prevalent in interactive dataframe workloads. Then, for the middle section of the dataframe, the partitions can reflect the distribution of \thinktime such that the partition sizes are smaller at intervals where interactions are likely to be issued. For example, if the median \thinktime is 20s and the operator's estimated execution time is 40s, it might be desirable to have smaller partitions after ~50\% of the rows have been processed. 
+
+The above strategy assumes sequential processing of every row in the dataframe. If, instead, the prevalent workload is working with a select subset of rows, then it is more effective to partition based on the value of the attributes that are commonly used for selection. Of course, partitioning is not necessary if computation started during \thinktime does not block computation for supporting interactions. 
+
+Note that another important consideration in generating partial results is the selectivity
+of the underlying operators and whether they are blocking operators. For the former, we may need
+to employ a much larger partition simply
+to generate $K$ results.
+For the latter, we may need to prioritize the
+generation of the aggregates corresponding to
+the groups in the top or bottom $K$ (in the case
+of group-by), or to employ algorithms 
+that prioritize the generation of the $K$ first
+sorted results (in the case of sorting).
+In either case, the problem becomes a lot more 
+challenging. 
+
+\subsection{Optimizing Future Interactions Leveraging Think Time}
+\label{sec:non-critical}
+
+\stitle{Non-critical Operator scheduling.} We now discuss scheduling non-critical operators. 
+Recall that these operators are organized in a DAG built from queries. 
+The job of our scheduler is to decide which \textit{source} operators to execute. 
+Source operators in the DAG are those whose precedent operators 
+do not exist or are already executed. 
+We assume an equal probability of users selecting any operator in the DAG to extend with an interaction. 
+
+The scheduler is optimized to reduce the interaction latency; we introduce
+the notion of an operator's \textit{delivery cost} as the proxy for it. 
+If an operator has not been executed yet, its delivery cost is the cost of executing the operator along with all of its unexecuted predecessors. 
+Otherwise, the delivery cost is zero.
+Our scheduler prioritizes scheduling the source operator that can reduce the delivery cost across all operators the most. 
+We define a utility function $U(s_i)$ to estimate the benefit of executing a source operator $s_i$.
+This function, for a node $s_i$ 
+is set to be the sum of the delivery cost 
+for the source operator and all of its successors $D_i$:
+\begin{equation}
+\label{eq:utility}
+U(s_i) = \sum_{j \in D_i}{c_j}
+\end{equation}
+where $c_j$ is the delivery cost for an operator $j$.
+Our scheduler chooses to execute the one with the highest $U(s_i)$.
+This metric prioritizes those operators that ``influence'' as many 
+expensive downstream
+operators as possible.
+
+\stitle{Caching for reuse.}
+When we are executing operators in the background, we store the result of each newly computed operator in memory. 
+However, if the available memory (i.e., the memory budget) is not sufficient to store the new result, 
+we need to recover enough memory by discarding materialized results of previously computed operators. 
+If the discarded materialized results are needed by future operators, we will execute the corresponding operators to recompute them. 
+Here, the optimization problem is to determine which materialized results should be discarded given the memory budget. 
+Our system addresses this problem by systematically considering three aspects of a materialized result, denoted $r_i$: 
+1) the chance of $r_i$ being reused, $p_i$, 
+2) the cost of recomputing the materialized result, $k_i$, 
+and 3) the amount of memory it consumes, $m_i$. 
+We estimate $p_i$ by borrowing ideas from the LRU replacement algorithm. 
+We maintain a counter $T$ to indicate the last time any materialized result is reused 
+and each materialized result is associated with a variable $t_i$ that tracks the last time it is reused.
+If one materialized result $r_i$ is reused, we increment the counter $T$ by one and set $t_i$ to $T$. 
+We use the following formula to estimate $p_i$: 
+\begin{equation}
+p_i = \frac{1}{T + 1 - t_i}
+\end{equation}
+We see that the more recently a materialized result $r_i$ is reused, the higher $p_i$ is. 
+We can use a cost model as in relational databases to estimate the recomputation cost $k_i$. 
+We note that we do not always recompute an operator from scratch. 
+Given that the other materialized results are in memory, 
+our cost model estimates the recomputation cost by considering reusing existing materialized results. 
+Therefore, we use the following utility function to decide which materialized result should be discarded.
+\begin{equation}
+O(r_i) = p_i \times \frac{m_i}{k_i}
+\end{equation}
+Here, $\frac{m_i}{k_i}$ represents the amount of memory we can spare per unit of recomputation cost to pay. 
+The lower $\frac{m_i}{k_i}$ is, the more likely we discard $r_i$. 
+Finally, our algorithm will discard the $r_i$ with the lowest $O(r_i)$ value.
+
+\stitle{Speculative materialization.}
+Our system not only considers caching results generated by users' programs, 
+but also speculatively materializes and caches results that go beyond what users specify, to be used by future operators. 
+One scenario we observed is that users intend to explore the data by changing the value of a filter 
+repeatedly. In this case, we can materialize the intermediate output results before we apply the filter 
+and when users modify the filter, we can reuse the saved results without computing them from scratch. 
+The downside of this approach is that it can increase the latency of computing an interaction when the \thinktime is limited. 
+Therefore, we enable this optimization only when users' predicted \thinktime of writing a new operator 
+is larger than the time of materializing the intermediate states.
+
+
+\subsection{Prediction of User Behavior}
+\label{sec:user}
+The accurate prediction of user behavior can greatly improve the efficacy of opportunistic evaluation. 
+Specifically, we need to predict two types of user behavior: \thinktime 
+and future interactions. 
+Section~\ref{sec:thinktime} described some preliminary statistics that can be used to construct a prior distribution for \thinktime. As the system observes the user work, this distribution can be updated to better capture the behavior of the specific user, as we expect the distribution of \thinktime to vary greatly based on the dataset, task, user expertise, and other idiosyncrasies. These workload characteristics can be factored into the \thinktime model for more accurate prediction. This \thinktime model can be used by the optimizer to decide the size of dataframe partitions to minimize progress loss due to preemption or to schedule non-critical operators whose expected execution times are compatible with the \thinktime duration.
+
+
+To predict future interactions, we can use the models from Yan et al.~\cite{yan2020auto}.
+These models are trained on a large corpus of data science notebooks from Github. 
+Since future interactions often build on existing operators, we can use the future interaction prediction model to estimate the probabilities of non-critical operators in the DAG leading to future interactions, which can be used by the scheduler to pick non-critical operators to execute next.
+Let $p_j$ be the probability of the children of an operator $j$ being an interaction. We can incorporate $p_j$ into the utility function in Equation~\ref{eq:utility} to obtain the updated utility function:
+\begin{equation}
+    U_p(s_i) = \sum_{j \in D_i} {c_j \times p_j}
+\end{equation}
+
+Of course, the benefits of opportunistic evaluation can lead to modifications in user behavior. For example, without opportunistic evaluation, a conscientious user might self-optimize by avoiding specifying expensive non-critical operators before interactions, potentially at the cost of code readability. When self-optimization is no longer necessary when authoring queries, the user may choose to group similar operators for better code readability and maintenance, thus creating more opportunities for opportunistic evaluation optimizations. 

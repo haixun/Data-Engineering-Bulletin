@@ -1,0 +1,108 @@
+%!TEX root = main.tex
+
+
+During the course of Machine Learning (ML) model development,
+a critical first step is {\em data validation},
+ensuring that the data meets acceptable standards
+necessary for input into ML training procedures.
+Data validation involves various sub-tasks,
+including 
+{\em data preparation}:
+transforming the data into a structured 
+form suitable for the desired end-goal,
+and  
+{\em data cleaning:}
+inspecting and fixing potential sources of errors.
+These validation steps of data preparation and cleaning
+are essential even if the eventual goal
+is simply exploratory data analysis
+as opposed to ML model development---in both
+cases, the quality of the eventual
+end-result, be it models or insights,
+are highly tied to these steps.
+This data validation process is highly exploratory and iterative, 
+as the data scientist often 
+starts off with a limited understanding 
+of the data content and quality.
+Data scientists therefore 
+perform data validation through {\em incremental trial-and-error},
+with the goals evolving over time: 
+they make a change,
+inspect the result (often just a sample) 
+to see if it has improved or ``enriched'' 
+the dataset in some way,
+e.g., by removing outliers or filling in NULL values, 
+expanding out a nested representation
+to a flat relational one, or pivoting to organize
+the dataset in a different manner 
+more aligned with the analysis
+goals.
+
+
+
+To support this iterative process of trial-and-error,
+data scientists often use powerful data analysis
+libraries such as Pandas~\cite{pandas-api} within computational notebooks,
+such as Jupyter or Google Colab~\cite{kluyver2016jupyter, colab}.
+Pandas supports a rich set of incrementally specified 
+operators atop a tolerant
+dataframe-based data model, drawn from relational algebra,
+linear algebra, and spreadsheets~\cite{petersohn13towards} 
+embedded within a traditional imperative programming language, Python. 
+While the use of dataframe libraries on computational notebooks
+is a powerful solution for data validation on small datasets, 
+this approach starts to break down on larger datasets~\cite{petersohn13towards}, with many operations requiring users to wait for
+unacceptably long periods, breaking flow. 
+Currently, this challenge may be overcome by either switching to a \emph{distributed dataframe system} (such as Dask~\cite{Dask} and Modin~\cite{Modin}), which introduces setup overhead and potential incompatibilities with the user's current workflow, or by users manually optimizing their queries, which is a daunting task as pandas has over 200 dataframe operations.
+We identify two key opportunities for improving the interactive
+user experience \textit{without requiring changes to user behavior}: 
+\begin{itemize}
+	\item Users often do not want to inspect the entire results of every single step.
+	\item Users spend time thinking about what action to perform next. 
+\end{itemize}
+
+\newpage
+Unfortunately, at present, every cell (the unit of execution
+in a notebook) issued by the
+user is executed verbatim immediately, 
+with the user waiting until execution is complete
+to begin their next step. Moreover, the system is idle 
+during {\em \thinktime}, i.e., when users are thinking
+about their next step or writing code.
+Fundamentally, {\em specification} 
+(how the user writes the query)
+and {\em execution} (what the system executes)
+are tightly coupled. 
+
+In this paper, we outline our initial insights and results
+towards optimizing dataframe queries for interactive workloads
+by {\em decoupling specification and execution}.
+In particular, dataframe queries are not executed immediately,
+unless the user intends to inspect the results,
+but are deferred to be computed during \thinktime. 
+We distinguish operators that produce results that users inspect, what we call \emph{interactions}, from those that do not.
+We can then use program slicing to quickly determine what code is
+{\em critical} in that it influences the interactions, i.e., what the user intends to see immediately,
+and what is {\em non-critical}, in that it can be computed in
+the background during think-time to speed up future interactions.
+For the critical portions, we further identify
+if it can be rewritten in ways that allows us to improve
+interactivity further. For example, identifying
+that users often only examine the first or 
+last few rows/columns
+of the result allows us to compute this
+as part of the critical portion 
+and defer the rest to the non-critical portion.
+For the non-critical portions, by deferring the execution of the non-critical
+portions, we can perform more holistic query planning
+and optimization.
+Moreover, we may 
+also {\em speculatively} compute
+other results that may prove useful in subsequent processing.
+We call our framework {\em opportunistic evaluation},
+preserving the benefits of eager evaluation (in that critical portions
+are prioritized), and lazy or deferred evaluation (in that non-critical
+portions are deferred for later computation). 
+This paper builds on our prior vision~\cite{petersohn13towards},
+wherein we outline our first steps towards establishing 
+a formal framework for reasoning about dataframe optimization systematically.

@@ -1,0 +1,66 @@
+%!TEX root = data-validation-ml-systems.tex
+\section{Data Validation Dimensions}
+\label{sec:dimensions}
+
+As ML systems learn from data, validation of the data ingested during training and prediction is a fundamental prerequisite for well functioning and robust ML systems \cite{Sculley2015, Bose2017a}. Relevant data validation dimensions for ML systems can be broadly categorized into those notions of data quality commonly considered in classical data base management systems (DBMS) and ML model dependent dimensions. In the following, we highlight some of the dimensions and provide examples for each category.
+
+\subsection{Classical DBMS dimensions}
+
+Independent of ML applications there are many data validation dimensions that have been investigated in the DBMS community, more specifically in the data profiling literature\cite{Abedjan2018}:
+
+\paragraph{Data Correctness:} This dimension refers to schema violations, such as string values in numeric columns, or generally syntactically wrong data. Defects in this dimension can often break ML processing pipelines. Some of these violations can be detected easily for instance by type checks, and corrupted data instances can be filtered out.
+
+
+\paragraph{Data Consistency} refers to defects that are not captured by syntactic correctness, including duplicate entries or invalid values. Detecting these cases can be difficult and computationally challenging, but there exist efficient approaches to de-duplication and detection of semantic inconsistencies. Violations of semantic inconsistencies can for instance be detected by validation of functional or approximate functional dependencies \cite{Papenbrock2015, Kruse2018}.
+
+\paragraph{Completeness} of a data source reflects the ratio of missing values in a data set. In principle this dimension is simple to probe, however only under the assumption that the missing value symbol is known. Unfortunately this assumption is often violated. As missing values often cause problems in data pipelines feeding into ML systems, a common strategy of avoid such problems is to replace missing values with syntactically valid values. These transformations often make the missing values pass validations for correctness and consistency.
+
+\newpage
+\paragraph{Statistical Properties:} This dimension includes basic descriptive statistics of an attribute, such as mean of a numeric or mode of a categorical variable, and more complex parametric or non-parametric statistical aggregates of a data set. A popular validation strategy in this data dimension is anomaly detection.
+
+\subsection{ML model dependent dimensions}
+
+Validating the above data quality dimensions can be challenging, but these tests of the input data are independent of the downstream ML model. This implies that testing only for these dimensions can lead to both false negatives, when a data corruption is not detected that has a negative impact on the downstream ML model, as well as false positives, when a data corruption raises an alarm but does not have any effect on the downstream ML model. Examples for false negatives of ML model independent validations include adversarial attacks, such as for instance avoiding filters for adult language by {\em leet speak}\footnote{\url{https://en.wikipedia.org/wiki/Leet}} strings obfuscated by misspellings and replacing letters with numeric characters. Examples for false positive alarms are ML models employing strong $L_1$ or sparsity-enforcing regularization constraints. In these models, a large number of input features is often not affecting the ML model output, hence distributional shifts in these input features would not be reflected in shifts of the ML model outputs and validation of the input data independent of the model outputs will raise false alarms.
+
+Data validation in the context of ML production systems thus has to take into account the current state of the downstream ML model to ensure robust and reliable performance. The state of the ML model and and the impact of data corruptions on ML performance can be monitored by a number of different validation dimensions of the ML model {\em output} data. These have to be validated along with the usual criteria common to all production software systems, such as requirements on the latency and availability of the system. SageMaker Model Monitor\footnote{\url{https://docs.aws.amazon.com/sagemaker/latest/dg/model-monitor.html}} is a solution that enables monitoring of models deployed in production. For example, alarms are triggered when data distributions shifts are detected.
+
+\paragraph{Predictive performance metrics} are usually the most important metrics optimized in production ML systems. These metrics include accuracy, precision or F1-score of a classifier, the mean-squared error, mean absolute error or $r^2$-scores for regression models or various ranking losses, evaluated via cross-validation on a test set that was not used for training the respective ML model. When the data processed by  trained and deployed ML model is drawn from the same distribution as the training and test data, then these cross-validated metrics reflect the predictive performance reliably. But in production ML systems, this assumption is often violated. Examples include shifts in the input data (covariate shifts) or shifts in the target data distribution (label shift).
+
+\paragraph{Robustness}
+The shifts induced by corruptions in the data that are a) not caught by upstream classical data validation techniques and that have b) a negative impact on the predictive performance of a production ML system can be difficult to detect, as there is no ground truth label information available for the data. In the absence of ground truth data needed to compute predictive performance metrics, one can resort to classical data validation techniques applied to the outputs of ML models. But this approach can fail to detect certain covariate shifts induced by outliers, adversarial attacks or other corruptions.
+
+\paragraph{Privacy metrics} have become increasingly important since ML models are used to process personal data such as health care data, financial transactions, movement patterns or really almost every aspect of our lives. Popular concepts include {\em differential privacy} \cite{Dworak_2006_diff} and {\em k-anonymity} \cite{Sweeney2002}. Note that k-anonymization~\cite{Sweeney2002} is not model dependent, it is a property of a data base where user data is considered private if information about each user cannot be distinguished from at least k-1 other users whose information is in the dataset.
+In the field of ML, differential privacy is more useful than k-anonymity. Two main reasons for that are a) k-anonymity is defined for a fixed data set, if new rows are added, one might need to convert the data again in order to achieve k-anonymity, and b) if a k-anonymous data set is combined with other information, it is often possible to de-anonymize the data.
+%
+A large body of literature in the ML community builds upon the definition of $\epsilon$-differential privacy~\cite{Dworak2014differantial} which deals with the problem of learning little to nothing about individual data-points while learning a lot about the population by ensuring the same conclusions can be drawn whether any single data-point is included in the dataset or not. Most implementations of differentially private ML models add noise to the data, gradients or the model coefficients~\cite{Abadi2016, Shokri2017, papernot2016semisupervised, Mironov2017}. This can be an effective countermeasure to model inversion attacks~\cite{Fredrikson2015} or membership inference attacks \cite{Shokri2017}. The amount of noise added determines the amount of privacy preserved -- but it also bounds the predictive performance or {\em utility} of the ML model \cite{Jayaraman2019}.
+
+\paragraph{Robustness to adversarial data} Recent developments have shown that ML models, placed at the centre of security-critical systems such as self-driving cars, can be targeted by dedicated adversarial examples - inputs that are very difficult to distinguish from regular data but are misclassified by the model~\cite{goodfellow2014explaining}. Those inputs, created by applying a small but very significant perturbation to regular examples can be used to manipulate the model to predict outputs desired by an adversary~\cite{szegedy2013intriguing, Biggio_2013, Nguyen_2015}. The robustness to adversarial attacks of the model can be measured by (1) generating a set of adversarial examples based on the test set~\cite{szegedy2013intriguing, Kurakin2017AdversarialEI, Hosseini2019AreOR, MoosaviDezfooli2016DeepFoolAS, goodfellow2014explaining} and (2) computing what is the change in models accuracy given a fixed average distortion, or what is the minimum average distortion needed to reach 0\% accuracy on the test set.
+
+
+\paragraph{Fairness}
+Another dimension that is highly relevant when putting ML systems in production is that of fairness or more generally ethical aspects of ML predictions \cite{Mehrabi2019}. There are a number of examples when ML technology used as assistive technology for instance in border control\footnote{\url{https://www.bbc.com/news/technology-53650758}} or policing\footnote{\url{https://www.nytimes.com/2019/07/10/opinion/facial-recognition-race.html}} led to racist or otherwise biased decisions. It has been widely recognized in the ML research community that when building ML applications validating the ML predictions with respect to fairness is a fundamental prerequisite. Evaluating this dimension is however amongst the most difficult of all validation  challenges: there are different fairness definitions, and even if one could agree on a small set of definitions, validating these requires insight into the respective grouping variables, which are, for ethical and legal reasons, typically not available. The relevant grouping information is thus often reflected in a data set through other features, which are considered not ethically problematic, such as zip code, but which are often correlated with ethically sensitive features. Other implicit biases of data sets can emerge from data preprocessing, for instance how missing values are dealt with when they are distributed not equally across ethnical groups \cite{Yang2020}. Detecting these biases requires not only domain expertise, but also often information that is not contained in the data set itself.
+
+
+
+%
+%\begin{enumerate\
+%
+%\item Classical DBMS dimensions
+%\begin{enumerate}
+%\item Correctness (e.g. Unknown schemas / data types, Wrong entries)
+%\item Consistency (e.g. Duplicates, Invalid values)
+%\item Statistical properties (Anomalies, Are value distributions changing over time? Is a column predictable from another column?)
+%\item Completeness (How many missing values?)
+%\end{enumerate}
+
+%\item ML model dependent dimensions
+%\begin{enumerate}
+%\item Generalization performance
+%\item Performance under (covariate, label) shift
+%\item Performance for single (rare) classes
+%\item Performance for single subgroups ({\bf fairness})
+%\item Robustness to adversarial data
+%\item Differential privacy
+%\item Constraints on compute time (some data points could lead to long prediction times, e.g. due to lack of sparsity)
+%\end{enumerate}
+%\end{enumerate}
