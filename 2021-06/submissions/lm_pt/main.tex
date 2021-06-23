@@ -1,0 +1,511 @@
+\documentclass[11pt,dvipdfm]{article}
+\usepackage[shortcuts,acronym]{glossaries}
+\usepackage{deauthor,times,graphicx}
+
+%% Abbreviations
+\newacronym{WDC}{WDC}{Web Data Commons}
+\newacronym{MWPD}{MWPD}{Mining the Web of Product Data}
+\newacronym{GPC}{GPC}{GS1 Global Product Classification standard}
+\newacronym{GTIN}{GTIN}{Global Trade Item Number}
+\newacronym{MLM}{MLM}{Masked Language Modelling}
+\newacronym{BPE}{BPE}{Byte-Pair Encoding}
+\newacronym{RNN}{RNN}{Recurrent Neural Network}
+\newacronym{NLP}{NLP}{Natural Language Processing}
+\newacronym{wF1}{wF1}{average weighted F1}
+\newacronym{hF1}{hF1}{hierarchical F1}
+
+\begin{document}
+
+\graphicspath{{alexanderbrinkmann/}}
+
+\title{Improving Hierarchical Product Classification using Domain-specific Language Modelling}
+
+\author{
+  Alexander Brinkmann, Christian Bizer\\
+  University of Mannheim\\
+  \{alex.brinkmann, chris\}@informatik.uni-mannheim.de
+}
+
+\maketitle
+
+\begin{abstract}
+In order to deliver a coherent user experience, product aggregators such as market places or price portals integrate product offers from many web shops into a single product categorization hierarchy. 
+Recently, transformer models have shown remarkable performance on various NLP tasks.
+These models are pre-trained on huge cross-domain text corpora using self-supervised learning and fine-tuned afterwards for specific downstream tasks. 
+Research from other application domains indicates that additional self-supervised pre-training using domain-specific text corpora can further increase downstream performance without requiring additional task-specific training data.
+In this paper, we first show that transformers outperform a more traditional fastText-based classification technique on the task of assigning product offers from different web shops into a product hierarchy.
+Afterwards, we investigate whether it is possible to improve the performance of the transformer models by performing additional self-supervised pre-training using different corpora of product offers, which were extracted from the Common Crawl.  
+Our experiments show that by using large numbers of related product offers for masked language modelling, it is possible to increase the performance of the transformer models by 1.22\% in wF1 and 1.36\% in hF1 reaching a performance of nearly 89\% wF1.
+\end{abstract}
+
+
+\section{Introduction}
+
+Product aggregators like market places or price portals support customers in finding the right offer for their desired product.
+To ensure a good customer experience, product aggregators integrate heterogeneous product offers from large numbers of online shops into their own product categorization hierarchy.
+This hierarchical product classification task is a major challenge for product aggregators as most shops use their own proprietary categorization hierarchy as well as diverse titles and descriptions for the same product. 
+A promising technique to improve hierarchical product classification are pre-trained transformer models~\cite{zhang_e-bert_2020, yang_bert_2020}.
+These pre-trained transformer models have recently shown success for many NLP tasks~\cite{ devlin_bert_2019, liu_roberta_2019, yang_xlnet_2020, raffel_exploring_2020, dong_unified_2019, lan_albert_2020}.
+The training of transformer models involves two steps~\cite{devlin_bert_2019, liu_roberta_2019}:
+\begin{enumerate}
+  \item Pre-Training: The model is pre-trained on a huge corpus of texts from books, news, online forums and stories using self-supervised \ac{MLM}.
+  \item Fine-Tuning: The pre-trained model is fine-tuned for downstream tasks using task-specific training data.
+\end{enumerate}
+
+During pre-training the model acquires general knowledge on language representation.
+This knowledge can be applied to solve down-stream tasks.
+In related work the pre-training step is extended by additionally pre-training the transformer model on domain-specific text corpora~\cite{lee_biobert_2019, zhang_e-bert_2020,beltagy_scibert_2019,gururangan_dont_2020}.
+In these works, the extended self-supervised pre-training results in improved performance on downstream tasks.
+
+Motivated by these findings, we investigate whether additional pre-training using heterogeneous product offers from the Web can improve hierarchical product classification.
+For this purpose, we use product offers, which the Web Data Commons project\footnote{\url{http://webdatacommons.org/largescaleproductcorpus/v2/}} has extracted from the Common Crawl\footnote{\url{https://commoncrawl.org/}}. 
+For identifying product offers and their attributes, the project relies on schema.org\footnote{\url{https://schema.org/}} annotations in the HTML pages of the web shops~\cite{primpeli_wdc_2019}. 
+The annotations enable the reliable extraction of the offer's title, the description of the offered product, as well as the offer's categorization within the proprietary categorization hierarchy of the specific web shop.  
+The heterogeneous category values are of special interest, because the categories contain information about the product classification of the web shop. 
+While being heterogeneous and web shop specific, previous work has show that this knowledge about product categories is beneficial for categorizing products into a single central product hierarchy~\cite{meusel_exploiting_2015, zhang_product_2019}.
+
+We experiment with three different product corpora for pre-training that differ in size and relatedness to the downstream task.
+Through these different characteristics we measure the influence of size and relatedness of the pre-training corpus on the downstream hierarchical product classification task.
+Additionally, we experiment with different hierarchical classification methods. 
+The methods combine RoBERTa\textsubscript{base}~\cite{liu_roberta_2019} with various classification heads in order to evaluate different approaches for exploiting the product hierarchy. 
+We evaluate the classification methods using two product classification tasks involving product offers from many different web shops.
+
+The contributions of this paper are as follows:
+\begin{itemize}
+  \item We are the first to show that the performance of transformer models can be improved for the task of hierarchical product classification by performing additional pre-training using a corpus of related product offers.
+  \item We show that using related product offers results in a better performance compared to randomly sampled product offers.
+\end{itemize}
+
+This paper is structured as follows:
+Section \ref{sec:base_models} introduces the classification models that will later be used for the experiments. Section \ref{sec:eval_task} describes the evaluation tasks. While Section \ref{sec:base_exp} presents the results of baseline experiments without additional language modelling. The effects of domain-specific \ac{MLM} for hierarchical product classification are investigated in Section \ref{sec:lang_mod}. 
+Section \ref{sec:rel_work} discusses related work.
+All data and code needed to replicate the results are available online\footnote{\url{https://github.com/wbsg-uni-mannheim/productCategorization}}.
+
+\section{Classification models}
+\label{sec:base_models}
+
+The architecture of all classification models is composed of a pre-trained RoBERTa\textsubscript{base} transformer model and a task-specific classification head.
+RoBERTa\textsubscript{base} is chosen due to its recent success on related \ac{NLP} tasks~\cite{liu_roberta_2019}. 
+Additionally, for one baseline model RoBERTa\textsubscript{base} is replaced by fastText\footnote{\url{https://github.com/facebookresearch/fastText}}, a state of the art neural network architecture for language representations~\cite{joulin_bag_2017}.
+For the classification the RoBERTa\textsubscript{base} model encodes the input text of the product offer.
+The first token of the encoded product offer is handed over to the classification head.
+Based on the first token, also referred to as [CLS] token, the classification head predicts a category for each product hierarchy level.
+Since it can be assumed that the product hierarchy contains valuable information, the given product classification challenge is tackled with three different classification heads.
+These classification heads try to exploit the upfront known product hierarchy.
+The three approaches are referred to as flat classification, hierarchical softmax and \ac{RNN}.
+
+\subsection{Flat Classification}
+
+For the flat classification, a linear layer makes a prediction based on the [CLS] token.
+As this classification approach only assigns product offers to lowest level of categories, the parent categories are inferred using the product hierarchy.
+For training a cross-entropy loss is used.
+
+\subsection{Hierarchical Softmax}
+The hierarchical softmax classification head predicts the category path with the highest probability for a product offer.
+To arrive at a probability for a category path, one local classifier is trained for each category in the product hierarchy.
+The local classifier predicts the probability of a category to be part of the category path.
+The product of all local predictions along a category path is the probability of a category path to be predicted for a product offer.
+Using softmax the most probable category path among all category paths is chosen.
+The input of the local classifiers is the transformer's [CLS] token.
+For training the cross-entropy loss is calculated per local classifier and per global category path.
+The combined loss deals with both the local impact of a single classifier and the global impact of a combination of classifiers along a category path.
+
+\subsection{Recurrent Neural Network}
+For the third classification head a \ac{RNN} sequentially predicts a category for each level in the product hierarchy.
+The input for this classification head are the transformer's [CLS] token and a hidden state with the same size as the [CLS] token.
+Based [CLS] token and hidden state a linear layer predicts the category for the current product hierarchy level.
+A second linear layer updates the hidden state.
+The updated hidden state is fed back into the \ac{RNN} to predict the next level in the product hierarchy.
+This procedure is repeated until a category is predicted for each level in the product hierarchy.
+During training the cross-entropy loss is calculated for each predicted category.
+
+\section{Evaluation Tasks}
+\label{sec:eval_task}
+
+This section introduces the hierarchical product classification tasks that are used for the evaluation.
+The objective of the tasks is to assign product offers from different web shops to the correct categories in a single central product hierarchy.
+
+\subsection{MWPD Task}
+
+The MWPD task was used at the \ac{MWPD} challenge\footnote{\url{https://ir-ischool-uos.github.io/mwpd/}}~\cite{zhang_mwpd2020_2020} for benchmarking.
+The \ac{MWPD} challenge was part of the International Semantic Web Conference (ISWC2020).
+In the product classification task of the \ac{MWPD} challenge participants have to sort product offers from different web shops into the \ac{GPC}\footnote{\url{https://www.gs1.org/standards/gpc}}~\cite{zhang_mwpd2020_2020}.
+\ac{GPC} classifies product offers into a product hierarchy based on their essential properties and their relationship to other products.
+For the gold standard of the \ac{MWPD} product classification data set the extracted product offers are manually assigned to the first three levels of the \ac{GPC}.
+
+\subsection{Icecat/WDC222 Task}
+
+The training set of the Icecat/WDC222 task\footnote{\url{http://data.dws.informatik.uni-mannheim.de/largescaleproductcorpus/categorization/}} is built based on the Open Icecat product data catalogue\footnote{\url{https://icecat.biz/en/menu/channelpartners/index.html}}.
+The Open Icecat product data catalog provides well maintained and normalized product information.
+For this work the attributes title, description, category and \ac{GTIN} are considered.
+For the classification the first three levels of the product hierarchy are considered.
+In order to evaluate whether a classifier is able to correctly classify heterogeneous product offers, the test set of the Icecat/WDC222 task consists of selected product offers from the \ac{WDC} Product Corpus\footnote{\url{http://webdatacommons.org/largescaleproductcorpus/v2/}}. 
+This corpus contains offers from 79 thousand different websites, which use schema.org annotations.
+Using the \ac{GTIN} the product offers are assigned to one out of 222 leaf categories in the Icecat product hierarchy.
+All assignments are manually verified.
+For all product offers the values of the attributes title, descriptions and \ac{GTIN} are extracted.
+As the Icecat training set contains normalized product offers and the WDC222 test set contains heterogeneous product offers, the Icecat/WDC222 task measures the transferability of a classifier trained on clean product offers and transferred to a scenario involving heterogeneous product offers.
+
+Table \ref{tab:dataSets} shows that the \ac{MWPD} training set is small compared to the training set of the Icecat use case, but the product offers of the \ac{MWPD} task are drawn from a comparably large number of different hosts.
+The WDC222 test set is again rather small but covers more hosts than the Icecat training set.
+These high numbers of hosts are an indication for more heterogeneity, because the product offers are differently represented by different hosts.
+The analysis of the median and maximum number of records per category of both use cases as shown in Table \ref{tab:attributes} reveals that the distribution of product offers among the categories is skewed towards a small number of categories.
+This distribution is common for hierarchical classification tasks~\cite{silla_survey_2011}.
+The missing description values of the Icecat/WDC222 task are a sign that the description might harm a classifier's performance if the classifier is trained on the Icecat training set and applied to the WDC222 test set.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lllllll@{}}
+Evaluation & No. Records & No. Records & No. Hosts & No. Hosts & No. Nodes & Avg. Depth \\
+Task & Train Set & Test Set & Train Set & Test Set & in Hierarchy & Hierarchy \\ \hline
+MWPD     & 10,012            & 3,107         & 1,547            & 878 & 396                          & 3                      \\
+Icecat/WDC222   & 765,743           & 2,984         & 1                & 112 & 410                  & 2.44                \\
+\hline
+\end{tabular}
+\caption{Evaluation Task Statistics}
+\label{tab:dataSets}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lllllll@{}}
+Evaluation & Data & Median No. & Missing  & Median No.  & Median No. & Maximum No.\\ 
+Task & Set & Characters & Values & Characters & Records & Records\\
+ & & Title & Description & Description & per Category & per Category \\\hline
+MWPD     & Train    & 50                           & 0\%                          & 304                                & 7                       & 3,228                    \\
+MWPD     & Test     & 48                           & 0\%                        & 365                                & 4                      & 799                   \\ \hline
+Icecat/WDC222   & Train    & 57                           & 29.65\%                      & 1,099                              & 215                    & 145,020                     \\
+Icecat/WDC222   & Test     & 54                           & 22.72\%                   & 140.5                              & 3                    & 516                     \\ \hline
+\end{tabular}
+\caption{Attribute Statistics}
+\label{tab:attributes}
+\end{table}
+
+\section{Baseline Experiments}
+\label{sec:base_exp}
+
+In order to set baselines, we apply the classification models described in Section \ref{sec:base_models} to both evaluation tasks that were introduced in Section \ref{sec:eval_task}. This section describes the setup as well as the results of the baseline experiments.
+
+\subsection{Evaluation Metrics}
+
+We use the \ac{wF1} score and the \ac{hF1} score to evaluate the performance of the different models.
+Both scores are designed for hierarchical classification tasks~\cite{zhang_mwpd2020_2020, kiritchenko_functional_2005}.
+The \ac{wF1} score is calculated as proposed by the organisers of the \ac{MWPD} challenge and shown in equation \ref{eq:avg_w_f1}~\cite{zhang_mwpd2020_2020}.
+\begin{equation}
+  Average\ weighted\ F1\ (wF1) = \sum_{j=1}^{L} \frac{1}{L} \sum_{i=1}^{K_j} \frac{n_i}{N} F_i
+  \label{eq:avg_w_f1}
+\end{equation}
+First, the F1 score of every category i in the hierarchy is calculated.
+To calculate the weighted F1 score per hierarchy level, the F1\textsubscript{i} score for each category i is weighted by number of true instances n\textsubscript{i} for each category i divided by the total number of instances N across all categories K on a specific hierarchy level.
+For the \ac{hF1} score all target and prediction categories of the different levels in the product hierarchy are considered to calculate the F1 score.
+This way the \ac{hF1} score is suitable for hierarchical classification tasks, as it directs higher credit to partially correct classifications, considers the distance of errors to the correct category and errors higher up in the hierarchy are punished more severely~\cite{kiritchenko_functional_2005}.
+Additionally, McNemar's significance test is applied to verify significantly different model performances on the test set~\cite{dietterich_approximate_1998}.
+For the test it is determined if a classifier's prediction is correct or incorrect first.
+Second, the numbers of correctly predicted product offers by the first classifier and incorrectly predicted product offers by the second classifier (correct/ incorrect) and vice versa (incorrect/ correct) are calculated.
+Using these numbers of correct/ incorrect and incorrect/ correct predictions as well as a significance level of 0.01, McNemar's test determines if the proportion of errors and consequently the performance of the two compared classifiers on the test set is significantly different.
+
+\subsection{Experimental Setup}
+
+We use the following hyperparameter setting for the experiments: 
+The learning rate is set to 3e-5 for the Icecat/WDC222 task and to 5e-5 for the \ac{MWPD} task.
+We use a batch size of 8 and a linear weight decay of 0.01.
+All fine-tuning experiments are run for 25 epochs on the \ac{MWPD} data set and 10 epochs on the Icecat/WDC222 data set.
+The different learning rates and numbers of epochs are a result of multiple experiment runs.
+In this setting the average results on the test set over three randomly initialized runs are reported for every experiment.
+For McNemar's test a majority voting among the results of the different runs is performed.
+As input for the classification models the values of the attributes title and description are lowercased and excessive white-spaces are removed.
+For the experiments in this section a RoBERTa\textsubscript{base} model is used to obtain a product representation, which is consumed by different classification heads to obtain a classification.
+
+\subsection{Results}
+
+The naming convention $<$input attributes$>$-$<$transformer model$>$-$<$head$>$ is used to refer to the different models.
+If the value of $<$input attribute$>$ is "1", only the title is used as input.
+If the value of $<$input attribute$>$ is "2", both title and description are used as input.
+In this section $<$transformer model$>$ is either "base" for RoBERTa\textsubscript{base} or "fast" for fastText.
+The value of $<$head$>$ refers to one of the classification heads introduced in Section \ref{sec:base_models} "flat", "hier" for hierarchical or "rnn".
+Experiments with the same capital letter in the column "Same Error Rate" share the same error proportion on the test set according to the significance test.
+Otherwise the experiment's error proportion is significantly different.
+The experimental results for the \ac{MWPD} task are shown in Table \ref{tab:MWPD}.
+Setting the results of the model 2-fast-flat into context to the other models shows that all transformer-based approaches outperform the fastText baseline model.
+A comparison of the models 1-base-flat and 2-base-flat reveals that adding the description as input improves the performance of the classification.
+The performance difference of the models 2-base-flat and 2-base-rnn is not significant and 2-base-hierarchical performs worse than the other two models.
+Thus, 2-base-flat is chosen as baseline model for the experiments with domain-specific language modelling as described in Section \ref{sec:lang_mod}.
+Table \ref{tab:ICECAT} shows the results of the different models for the Icecat/WDC222 task.
+Again, the fastText based model 1-fast-flat is outperformed by the transformer-based models.
+The comparison of the models 1-base-flat and 2-base-flat shows that adding the description harms the performance of the trained classifier.
+This finding is expected given the high percentage of missing values and the difference in the median number of characters between training and test set as shown in Table \ref{tab:attributes}.
+This comparison of the models 1-base-flat and 1-base-rnn shows that the \ac{RNN} leads to a performance gain.
+A reason for this improvement might be the huge size of the Icecat training data set compared to the size of the \ac{MWPD} data set.
+This size enables the \ac{RNN} classification head to better learn the encoded hierarchy of the labels, which is beneficial for the classification on the test data set.
+
+\begin{table}[h]
+\centering  
+\begin{tabular}{@{}llllllll@{}}
+
+Model           & Attributes         & Classification & wF1   & $\Delta$ wF1 & hF1   & $\Delta$ hF1 & Same Error\\ 
+                    &                    & Head           &       &       &       &  & Rate\\ \hline
+2-fast-flat & Title, Desc.                & Flat            & 84.26 &       & 82.68 & &       \\
+1-base-flat         & Title              & Flat           & 87.01 & 2.75  & 87.03 & 4.35  & \\
+2-base-flat         & Title, Desc. & Flat           & 87.52 & 3.26  & 87.62 & 4.94  & A\\
+2-base-hier    & Title, Desc. & Hierarchical  & 87.00    & 2.74  & 87.47 & 4.79 & \\
+2-base-rnn  & Title, Desc. & RNN            & 87.47 & 3.21  & 87.67 & 4.99 & A \\ \hline
+\end{tabular}
+\caption{Experimental results without Language Modelling - MWPD Task}
+\label{tab:MWPD}
+\end{table}
+
+\begin{table}[h]
+  \centering
+\begin{tabular}{@{}llllllll@{}}
+Model           & Attributes         & Classification & wF1   & $\Delta$ wF1 & hF1   & $\Delta$ hF1 & Same Error  \\ 
+                    &                    & Head           &       &       &       &  & Rate\\ \hline
+1-fast-flat & Title              & Flat           & 77.58 &       & 83.64 &  &    \\
+1-base-flat         & Title              & Flat           & 83.36 & 5.78  & 84.69 & 1.05 & \\
+2-base-flat         & Title, Desc. & Flat           & 80.91 & 3.33  & 81.48 & -2.16 & \\
+1-base-rnn          & Title & RNN            & 86.56 & 8.98  & 85.61 & 1.97 & \\ \hline
+\end{tabular}
+\caption{Experimental results without Language Modelling - Icecat/WDC222 Task}
+\label{tab:ICECAT}
+\end{table}
+
+\section{Domain-specific Language Modelling}
+\label{sec:lang_mod}
+
+After establishing baseline results in the previous section, we now investigate the effect of domain-specific language modelling on the performance of RoBERTa\textsubscript{base} models for hierarchical product classification.
+In this section the extraction of the domain-specific product offer corpora and the applied \ac{MLM} approach are explained.
+The effects of domain-specific \ac{MLM} are demonstrated by fine-tuning the newly pre-trained transformer models on the \ac{MWPD} use case.
+The results of this fine-tuning are set into relation to the baseline results without domain-specific pre-training.
+
+\subsection{Product Corpora}
+
+In total three different product corpora are used for domain-specific \ac{MLM}.
+All three product corpora contain product offers extracted from the \ac{WDC} Product Corpus\footnote{\url{http://webdatacommons.org/structureddata/2017-12/stats/schema\_org\_subsets.html}}.
+The \ac{WDC} Product Corpus contains structured data for 365,577,281 product offers that are extracted from 581,482 different hosts using schema.org annotations.
+The hosts use schema.org annotations to enrich the search results of product aggregators with their web shop's product offers~\cite{primpeli_wdc_2019}.
+Three strategies are applied to retrieve product offers from the \ac{WDC} Product Corpus.
+For the first two domain-specific product corpora 1,547 top-level domains of product offers from the \ac{MWPD} training set are identified.
+Using these top-level domains, product offers from the same top-level domains are extracted from the \ac{WDC} Product Corpus.
+This heuristic assumes that all products offered by a single shop (top-level domain) are related.
+The first product corpus contains 75,248 product offers and is called Small Related product corpus.
+The second product corpus contains 1,185,884 product offers and is referred to as Large Related product corpus.
+Through these two corpora the effect of the number of the product offer on \ac{MLM} is measured.
+For the third corpus a large random sample of product offers is extracted from the \ac{WDC} product corpus.
+This corpus is referred to as Large Random product corpus.
+The Large Random product corpus enables us to measure the effect of relatedness of product offers on domain-specific language modelling.
+Table \ref{tab:DSLM1} gives an overview of the product corpora's characteristics.
+For the two related product corpora the median number of records per hosts is higher compared to the Large Random product corpus.
+This shows the focus of the related corpora on the top-level domains extracted from the training set.
+The Large Random product corpus does not have this focus.
+Consequently, the number of hosts is a lot higher and the median number of records per host is lower.
+\begin{table}[h]
+  \centering
+\begin{tabular}{@{}llllllllll@{}}
+Product      &No.      & No. & Median No.  & Max No. \\
+Corpus &Records & Hosts & Records per Host & Records per Host \\ \hline
+Small Related & 75,248    & 1,160              & 100                      & 400 \\
+Large Related & 1,185,884 & 1,505              & 48                     & 5,885 \\
+Large Random& 1,029,063 & 98,421             & 2                  & 2,878 \\ \hline
+\end{tabular}
+\caption{Size of Product Corpora}
+\label{tab:DSLM1}
+\end{table}
+
+All extracted product offers have a title and at least one of the attributes description or category.
+The attributes are identified using the schema.org product annotations\footnote{\url{https://schema.org/Product}} name for title, description for description as well as category, breadcrumb and breadcrumbList for category.
+The attribute category is associated with multiple annotations, because different hosts use various annotations to categorise their products.
+Lastly, all attribute values are lowercased and excessive white spaces are removed.
+Table \ref{tab:DSLM2} shows that the product corpus Large Random has a comparably high percentage of missing description values.
+The Large Related product corpus has a lot of missing category values.
+These characteristics might influence the outcome of \ac{MLM}.
+\begin{table}[h]
+  \centering
+\begin{tabular}{@{}llllll@{}}
+Product  & Median No. & Median No. & Missing  & Median No. & Missing \\
+Corpus & Characters & Characters & Values & Characters & Values \\ 
+ &  Title & Description & Desccription & Category & Category \\ \hline
+Small Related & 38                               & 310                                    & 10.43\%                      & 24                                  & 29.69\%                   \\
+Large Related & 41                               & 275                                    & 7.06\%                       & 22                                  & 68.90\%                   \\
+Large Random& 34                               & 39                                     & 72.99\%                      & 70                                  & 44.32\%                   \\ \hline
+\end{tabular}
+\caption{Distribution of Attributes in the Product Corpora}
+\label{tab:DSLM2}
+\end{table}
+
+\subsection{Attribute Combinations}
+
+For \ac{MLM} the attributes title, category and description are used.
+The product categories do not follow the categories of the downstream hierarchical product classification, because these categories assigned by the online shops themselves.
+Still these categories can contain valuable product information.
+In the basic setup the attribute values are concatenated to a single line text representation of the product.
+This default attribute combination is referred to as Title-Cat-Desc.
+To measure the effect of the heterogeneous categories, two additional product text representations are used for \ac{MLM}.
+In one scenario only title and description are considered for \ac{MLM}.
+The categories are disregarded. 
+This scenario is referred to as Title-Desc and encoded in the model's name as $<$transformer model$>$\textsubscript{nocat}.
+As alternative setup, the product attributes are split into two lines.
+One line contains the attribute values of title and category and the other line contains the attribute values of title and description.
+This scenario is referred to as Title-Cat/Title-Desc and encoded in the model's name as $<$transformer model$>$\textsubscript{ext}.
+This way the influence of the heterogeneous categories during language modelling can be measured.
+Due to the smaller size and the low percentage of missing category values of the product corpus Small Related as shown in Table \ref{tab:DSLM1}, the impact of using the category information on the model performance is evaluated using this product corpus.
+
+\subsection{MLM Procedure}
+
+The pre-training used to inject knowledge about product offers into the RoBERTa \textsubscript{base} model follows the \ac{MLM} procedure used to pre-train RoBERTa \textsubscript{base} initially.
+During \ac{MLM} in each epoch a random sample of tokens from the input sequence is selected and replaced by the special token [MASK]. 
+Uniformly 15\% of the input tokens are selected for possible replacement. 
+Of these selected tokens, 80\% are replaced with [MASK], 10\% are left unchanged and 10\% are replaced by a randomly selected vocabulary token.
+For \ac{MLM} a language modelling head predicts the masked tokens of the input.
+The \ac{MLM} objective is a cross-entropy loss on predicting the masked tokens~\cite{devlin_bert_2019, liu_roberta_2019}.
+For the downstream hierarchical product classification the language modelling head is replaced by one of the task-specific classification heads introduced in Section \ref{sec:base_models}.
+
+\subsection{Experimental Setup}
+
+For pre-training the RoBERTa\textsubscript{base} models on the different product corpora, the chosen hyperparameters are a batch size of 4, a learning rate of 5e-5 and a linear weight decay of 0.01.
+All models are pre-trained for 5 epochs.
+The downstream hierarchical product classification follows the same settings as the baseline experiments described in Section \ref{sec:base_exp}.
+In this setting the average results on the test set over three randomly initialized runs for each experimental setup are reported.
+Based on their usefulness for the baseline models both attributes title and description are used as input for hierarchical product classification on the \ac{MWPD} task.
+For the Icecat/WDC222 task only the title is used as input.
+Since the collection of the product corpora focuses on the \ac{MWPD} task, the conducted experiments with an extended domain-specific \ac{MLM} focus on the \ac{MWPD} task, too.
+The best performing pre-trained model on the \ac{MWPD} task is transferred to the Icecat/WDC222 task. 
+Table \ref{tab:MWPD2} and Table \ref{tab:Icecat2} show the experimental results of an extended domain-specific \ac{MLM} for hierarchical product classification.
+To reference the different models the same encoding as in Section \ref{sec:base_exp} is used.
+For $<$transformer model$>$ the identifiers rel\_s for pre-training on the Small Large corpus, rel\_l for pre-training on the Related Large corpus and rand\_l for pre-training on the Random Large corpus are added.
+Experiments with the same capital letter in the column "Same Error Rate" share the same error proportion on the test set according to McNemar's significance test.
+Otherwise the experiment's error proportion is significantly different.
+
+\begin{table*}
+  \centering
+  \label{tab:MWPD2}
+\begin{tabular}{@{}lllllllll@{}}
+Model & Product  & Attribute & Head & wF1   & $\Delta$ wF1 & hF1   & $\Delta$ hF1 & Same Error \\ 
+ & Corpus  & Combination &  &    &  &   &  & Rate \\ 
+   & \ac{MLM}        & \ac{MLM}       &   &  &  &  & & \\ \hline
+2-base-flat         & None & None & Flat           & 87.52 &   & 87.62 & 4.94 & B \\
+2-rel\_l-flat & Large Related & Title-Cat-Desc & Flat & 87.61 & 0.09   & 87.70  & 0.08 & B  \\
+2-rel\_s-rnn & Small Related & Title-Cat-Desc & RNN  & 88.31 & 0.79   & 88.47 & 0.85 & C \\
+2-rel\_l-rnn & Large Related & Title-Cat-Desc & RNN & 88.74 & 1.22  & 88.80  & 1.18 &  \\
+2-rand\_l-rnn & Large Random  & Title-Cat-Desc & RNN & 88.19 & 0.67  & 88.34 & 0.72 & \\
+2-rel\_l-hierar. & Large Related & Title-Cat-Desc & Hierar. & 88.44 & 0.92  & 88.60 & 0.98 & \\
+2-rel\_s\textsubscript{nocat}-rnn & Small Related & Title-Desc & RNN & 88.27 & 0.75   & 88.41 & 0.79 & C \\
+2-rel\_s\textsubscript{ext}-rnn & Small Related & Title-Cat/ & RNN & 88.74 & 1.22  & 88.98 & 1.36 & \\
+ & & Title-Desc & & & & & & \\
+\end{tabular}
+\caption{Experimental results with Language Modelling - MWPD Task}
+\end{table*}
+
+\begin{table*}
+  \centering
+  \label{tab:Icecat2}
+\begin{tabular}{@{}lllllllll@{}}
+\toprule
+Model & Product  & Attribute & Head & wF1   & $\Delta$ wF1 & hF1   & $\Delta$ hF1 & Same Error\\ 
+ & Corpus  & Combination &  &    &  &   &  & Rate\\ 
+   & \ac{MLM}        & \ac{MLM}       &   &  &  &  & & \\ \hline
+1-base-rnn         & None & None & Flat           & 86.56 &   & 85.58 &  & D \\
+1-rel\_l-rnn & Large Related & Title-Cat-Desc & RNN & 86.38 & -0.18 & 85.61  & +0.03 & D  \\
+\end{tabular}
+\caption{Experimental results with Language Modelling - Icecat/WDC222 Task}
+\end{table*}
+
+\subsection{Effect of Using Different Product Corpora}
+
+Table \ref{tab:MWPD2} shows that the baseline model 2-base-flat is outperformed by all other models on the \ac{MWPD} task.
+Our best model 2-rel\_l-rnn outperforms the baseline model 2-base-flat by 1.22 \ac{wF1} and 1.18 \ac{hF1} points. 
+According to the significance test this performance difference is significant.
+This demonstrates the positive impact of domain-specific \ac{MLM} on hierarchical product classification.
+The performance increase of the model 2-rel\_l-rnn compared to the models 2-rel\_s-rnn and 2-rand\_l indicates that a large number of related product offers improves the model's performance the most.
+Among the classification heads, the results of the models 2-rel\_l-flat, 2-rel\_l-hier and 2-rel\_l-rnn show that the \ac{RNN} profits most from domain-specific pre-training.
+Table \ref{tab:Icecat2} reveals that the models 1-rel\_l-rnn and 1-base-rnn have the same performance on the Icecat/WDC222 task.
+This underlines that the pre-training corpus has to be as similar as possible to the hierarchical product classification task to gain a significant performance boost from pre-training.
+
+\subsection{Effect of Using Web Shop Categories}
+
+The results in Table \ref{tab:MWPD2} indicate a slightly positive effect of using the heterogeneous categorization information from the original web shops during pre-training.
+A comparison of the models 2-rel\_s\textsubscript{nocat}-rnn and 2-rel\_s-rnn shows that disregarding the web shop categories has a negative but not significant impact on the model's performance.
+In the extended scenario of model 2-rel\_s\textsubscript{ext}-rnn, the model's performance improves up to the performance level of the model 2-rel\_l-rnn and significantly outperforms the baseline model 2-base-flat by 1.22 \ac{wF1} and 1.36 \ac{hF1} points on the \ac{MWPD} task. 
+A reason for these results might be that doubling the product representations during pre-training has a positive impact, because it almost doubles the amount of available text for pre-training.
+This effect is comparable to doubling the number of training epochs, which might improve the performance results, too.
+Another reason might be the length of the different attributes.
+The values of the attributes title and category are rather short compared to the attribute values of the description as shown by the median number of characters in Table \ref{tab:attributes}.
+If the product offer is represented by a single line, the generated masked tokens during \ac{MLM} are more likely part of the description than part of title or category.
+If mainly tokens from the description are masked, the model learns to better represent these long descriptions.
+At the same time, it can be assumed that the title is more informative than the lengthy description.
+By presenting the product offers twice with different attribute combinations to the model during pre-training the disturbing effect of long descriptions is reduced.
+This allows the model to better exploit the heterogeneous categories and the title.
+From our results we can conclude that the heterogeneous categories from the web shops have a slightly positive but not significant impact on the model's performance.
+
+\section{Related Work}
+\label{sec:rel_work}
+
+This section discusses related work on the domain adaptation of transformer models and gives an overview of the state of the art concerning hierarchical product classification using transformer models.
+
+\subsection{Domain Adaptation}
+The technique of pre-training transformer models on large text corpora and fine-tuning them for downstream tasks has proven successful in \ac{NLP}~\cite{devlin_bert_2019,liu_roberta_2019,yang_xlnet_2020}.
+BERT is one of these transformer models and was pre-trained on publicly available text corpora consisting such as the text of books and the English Wikipedia~\cite{devlin_bert_2019}.
+Through pre-training the model obtains the ability to encode natural language~\cite{raffel_exploring_2020}.
+This knowledge about natural language is then transferred to downstream tasks.
+Pre-trained domain-specific models have shown that pre-training on domain-specific text improves the performance on downstream domain-specific tasks~\cite{lee_biobert_2019, zhang_e-bert_2020, beltagy_scibert_2019, gururangan_dont_2020}.
+E-BERT for example uses adaptive masking on a product and a review corpus during pre-training to learn e-Commerce knowledge on phrase-level and on product-level.
+Pre-training enables E-BERT to outperform a BERT based model on different downstream tasks related to e-commerce~\cite{zhang_e-bert_2020}.
+Comparing the effects of adaptive masking and random masking using the product offer corpora that were created for this paper is an interesting direction for future work.
+
+\subsection{Hierarchical Product Classification}
+Related work shows that exploiting the hierarchical structure can improve classification results~\cite{gao_deep_2020, silla_survey_2011, yang_bert_2020, wehrmann_hierarchical_2018, you_attentionxml_2019}.
+The participants of the \ac{MWPD} challenge show that in addition to exploiting the hierarchy, pre-trained transformer models can boost the results of hierarchical product classification tasks~\cite{zhang_mwpd2020_2020}.
+Team Rhinobird, the winners of the \ac{MWPD} challenge, combine a pre-trained transformer model BERT with a hierarchical classification head~\cite{yang_bert_2020}.
+Their Dynamic Masked Softmax classification head sequentially predicts the categories of different levels in the product hierarchy by actively restricting the classes, which can be predicted on the lower levels based on the predicted parent level node.
+Through different BERT based representations an ensemble of classifiers with the Dynamic Masked Softmax head enables Rhinobird to reach a \ac{wF1} score of 88.08 on the MWPD task that is used in this paper.
+Additionally, Rhinobird~\cite{yang_bert_2020} applies pseudo labelling on the unlabeled test data to further improve the performance of their model.
+This procedure might leak information about the test set into the training process. 
+Thus, we compare our models to the Rhinobird results without pseudo labelling. 
+Our best model based on a domain-specifically pre-trained RoBERTa model and a \ac{RNN} classification head achieves a performance of 88.74 \ac{wF1} points.
+This is an improvement of +0.66 points over Rhinobird's results.
+Given that Rhinobird achieves this good performance using an ensemble of models, future work could examine how an ensemble consisting of differently pre-trained and differently fine-tuned transformers can further improve the performance of our model.
+Team ASVinSpace uses a CNN based approach for language modelling with a multi-output classification head that predicts the categories of the different levels in the product hierarchy~\cite{borst_language_2020}.
+Our best model outperforms ASVinSpace's approach by +2.14 \ac{wF1} points.
+
+\section{Conclusion}
+\label{sec:conc}
+Our results show that the performance of transformer models on hierarchical product classification tasks can be improved through domain-specific pre-training on a corpus of related product offers. 
+All domain-specifically pre-trained and fine-tuned models outperform the baseline model, which relies on general pre-training and task-specific fine-tuning. 
+Our experiments with three different domain-specific corpora of product offers demonstrate that a large corpus of related product offers leads to the highest performance gain.
+If we adjust the product offer representation during pre-training to exploit the special characteristics of the attributes title, description and category, the result on the hierarchical product classification task is further improved even though only a small corpus of related products is used for pre-training.
+With this approach and a task-specific classification head our best model outperforms the baseline model by 1.22 \ac{wF1} points and 1.36 \ac{hF1} points.
+
+%%
+%% The next two lines define the bibliography style to be used, and
+%% the bibliography file.
+\begin{thebibliography}{10}
+\itemsep=1pt
+\begin{small}
+
+\bibitem{joulin_bag_2017}A.~Joulin, E.~Grave, P.~Bojanowski and T.~Mikolov. \newblock Bag of {Tricks} for {Efficient} {Text} {Classification}. \newblock {\em 15th {Conference} of the {European} {Chapter} of the {Association} for {Computational} {Linguistics}}, 2:427--431, 2017.
+\bibitem{devlin_bert_2019}J.~Devlin, M.~Chang, K.~Lee and K.~Toutanova. \newblock {BERT}: {Pre}-training of {Deep} {Bidirectional} {Transformers} for {Language} {Understanding}. \newblock {\em Conference of the {North} {American} {Chapter} of the {Association} for {Computational} {Linguistics}: {Human} {Language} {Technologies} ({NAACL}-{HLT})}, 4171--4186, 2019.
+\bibitem{liu_roberta_2019}Y.~Liu, M.~Ott, N.~Goyal, J.~Du, M.~Joshi, D.~Chen, O.~Levy, M.~Lewis, L.~Zettlemoyer and V.~Stoyanov. \newblock {RoBERTa}: {A} {Robustly} {Optimized} {BERT} {Pretraining} {Approach}. \newblock {\em arXiv:1907.11692 [cs]}, 2019.
+\bibitem{lee_biobert_2019}J.~Lee, W.~Yoon, S.~Kim, D.~Kim, S.~Kim, C.~So and J.~Kang. \newblock {BioBERT}: a pre-trained biomedical language representation model for biomedical text mining. \newblock {\em Bioinformatics}, 36:1234--1240, 2019.
+\bibitem{zhang_e-bert_2020}D.~Zhang, Z.~Yuan, Y.~Liu, Z.~Fu, F.~Zhuang, P.~Wang, H.~Chen and H.~Xiong. \newblock E-{BERT}: {A} {Phrase} and {Product} {Knowledge} {Enhanced} {Language} {Model} for {E}-commerce. \newblock {\em arXiv:2009.02835 [cs]}, 2020.
+\bibitem{gao_deep_2020}D.~Gao, W.~Yang, H.~Zhou, Y.~Wei, Y.~Hu and H.~Wang. \newblock Deep {Hierarchical} {Classification} for {Category} {Prediction} in {E}-commerce {System}. \newblock {\em 3rd Workshop on e-{Commerce} and {NLP} ({ECNLP})}, 64--68, 2020.
+\bibitem{beltagy_scibert_2019}I.~Beltagy, K.~Lo and A.~Cohan. \newblock {SciBERT}: {A} {Pretrained} {Language} {Model} for {Scientific} {Text}. \newblock {\em Conference on {Empirical} {Methods} in {Natural} {Language} {Processing} and the 9th {International} {Joint} {Conference} on {Natural} {Language} {Processing} ({EMNLP}-{IJCNLP})}, 3615--3620, 2019.
+\bibitem{silla_survey_2011}C.~Silla and A.~Freitas. \newblock A survey of hierarchical classification across different application domains. \newblock {\em Data Mining and Knowledge Discovery}, 22:31--72, 2011.
+\bibitem{meusel_exploiting_2015}R.~Meusel, A.~Primpeli, C.~Meilicke, H.~Paulheim and C.~Bizer. \newblock Exploiting {Microdata} {Annotations} to {Consistently} {Categorize} {Product} {Offers} at {Web} {Scale}. \newblock {\em International {Conference} on {Electronic} {Commerce} and {Web} {Technologies}}, 83--99, 2015.
+\bibitem{kiritchenko_functional_2005}S.~Kiritchenko, S.~Matwin and A.~Famili. \newblock Functional {Annotation} of {Genes} {Using} {Hierarchical} {Text} {Categorization}. \newblock {\em {ACL} {Workshop} on {Linking} {Biological} {Literature}, {Ontologies} and {Databases}: {Mining} {Biological} {Semantics}}, 2005.
+\bibitem{zhang_mwpd2020_2020}Z.~Zhang, C.~Bizer, R.~Peeters and A.~Primpeli. \newblock {MWPD2020}: {Semantic} {Web} challenge on {Mining} the {Web} of {HTML}-embedded product data. \newblock {\em {CEUR} {Workshop} {Mining} the {Web} of {HTML}-embedded {Product} {Data}}, 2720:2--18, 2020.
+\bibitem{yang_xlnet_2020}Z.~Yang, Z.~Dai, Y.~Yang, J.~Carbonell, R.~Salakhutdinov and Q.~Le. \newblock {XLNet}: {Generalized} {Autoregressive} {Pretraining} for {Language} {Understanding}. \newblock {\em 33rd {Conference} on {Neural} {Information} {Processing} {Systems} ({NeurIPS})}, 2020.
+\bibitem{raffel_exploring_2020}C.~Raffel, N.~Shazeer, A.~Roberts, K.~Lee, S.~Narang, M.~Matena, Y.~Zhou, W.~Li and P.~Liu. \newblock Exploring the {Limits} of {Transfer} {Learning} with a {Unified} {Text}-to-{Text} {Transformer}. \newblock {\em Machine Learning Research}, 21:1--67, 2020.
+\bibitem{yang_bert_2020}L.~Yang, E.~Shijia, S.~Xu and Y.~Xiang. \newblock Bert with {Dynamic} {Masked} {Softmax} and {Pseudo} {Labeling} for {Hierarchical} {Product} {Classification}. \newblock {\em {CEUR} {Workshop} {Mining} the {Web} of {HTML}-embedded {Product} {Data}}, 2720:2020.
+\bibitem{wehrmann_hierarchical_2018}J.~Wehrmann, R.~Cerri and R.~Barros. \newblock Hierarchical {Multi}-{Label} {Classification} {Networks}. \newblock {\em 35th {International} {Conference} on {Machine} {Learning}}, 5075--5084, 2018.
+\bibitem{you_attentionxml_2019}R.~You, Z.~Zhang, Z.~Wang, S.~Dai, H.~Mamitsuka and S.~Zhu. \newblock {AttentionXML}: {Label} {Tree}-based {Attention}-{Aware} {Deep} {Model} for {High}-{Performance} {Extreme} {Multi}-{Label} {Text} {Classification}. \newblock {\em 33rd {Conference} on {Neural} {Information} {Processing} {Systems} ({NeurIPS})}, 32:11, 2019.
+\bibitem{zhang_product_2019}Z.~Zhang and M.~Paramita. \newblock Product {Classification} {Using} {Microdata} {Annotations}. \newblock {\em International {Sematic} {Web} {Conference} ({ISWC})}, 716--732, 2019.
+\bibitem{borst_language_2020}J.~Borst, E.~Krner and A.~Niekler. \newblock Language {Model} {CNN}-driven similarity matching and classification for {HTML}-embedded {Product} {Data}. \newblock {\em {CEUR} {Workshop} {Mining} the {Web} of {HTML}-embedded {Product} {Data}}, 2720:11, 2020.
+\bibitem{dong_unified_2019}L.~Dong, N.~Yang, W.~Wang, F.~Wei, X.~Liu, Y.~Wang, J.~Gao, M.~Zhou and H.~Hon. \newblock Unified {Language} {Model} {Pre}-training for {Natural} {Language} {Understanding} and {Generation}. \newblock {\em 33rd {Conference} on {Neural} {Information} {Processing} {Systems} ({NeurIPS})}, 2019.
+\bibitem{primpeli_wdc_2019}A.~Primpeli, R.~Peeters and C.~Bizer. \newblock The {WDC} {Training} {Dataset} and {Gold} {Standard} for {Large}-{Scale} {Product} {Matching}. \newblock {\em International {World} {Wide} {Web} {Conference} ({WWW})}, 381--386, 2019.
+\bibitem{dietterich_approximate_1998}T.~Dietterich \newblock Approximate {Statistical} {Tests} for {Comparing} {Supervised} {Classification} {Learning} {Algorithms}. \newblock {\em Neural Computation}, 10:1895--1923, 1998.
+\bibitem{lan_albert_2020}Z.~Lan, M.~Chen, S.~Goodman, K.~Gimpel, P.~Sharma and R.~Soricut. \newblock {ALBERT}: {A} {Lite} {BERT} for {Self}-supervised {Learning} of {Language} {Representations}. \newblock {\em International {Conference} on {Learning} {Representations} ({ICLR})}, 2020.
+\bibitem{gururangan_dont_2020}S.~Gururangan, A.~MarasoviÄ‡, S.~Swayamdipta, K.~Lo, I.~Beltagy, D.~Downey and N.~Smith. \newblock Don't {Stop} {Pretraining}: {Adapt} {Language} {Models} to {Domains} and {Tasks}. \newblock {\em 58th {Annual} {Meeting} of the {Association} for {Computational} {Linguistics}}, 8342--8360, 2020.
+
+\end{small}
+\end{thebibliography}
+
+\end{document}
+\endinput
