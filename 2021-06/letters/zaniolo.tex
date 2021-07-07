@@ -1,0 +1,987 @@
+\documentclass[11pt]{article} 
+\usepackage{deauthor,times,graphicx} 
+\usepackage{cancel}
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ \def\textit #1{{\it #1}}
+  \def\mt{\tt}
+  \newcommand{\bldl}{\smallskip\[\begin{array}{ll}}
+ \newcommand{\cldl}{\[\begin{array}{ll}}
+ \newcommand{\eldl}{\end{array}\]\rm}
+ \newcommand{\prule}[2]{ \mt #1 \leftarrow & \mt #2 \\}
+ \newcommand{\pfact}[2]{ \mt  #1 &  \mt #2 \\}
+ \def\pbody#1#2{ \mt #1 & \mt #2 \\}
+ \def\inv{\vspace{-0.2cm}}
+ \def\sinv{\vspace{-0.1cm}}
+ \def\pin{\vspace{0.1cm}}
+ \def\magg#1{ min \langle #1 \rangle}
+ \def\inv{\vspace{-0.2cm}}
+ \def\sinv{\vspace{-0.1cm}}
+ \def\pinv{\vspace{0.1cm}}
+  \def\rof#1{$\tt r_{#1}$}
+ \def\prem{$\cal P$$\!reM$~}
+ % \def\Prem{{\large $\cal  P$$\!reM$\xspace\xspace}}
+\def\Fix{$T_\gamma^{\uparrow n}(\emptyset)= T_\gamma^{\uparrow n{+}1}\!(\emptyset)$ }
+\def\f--{\tt{ \_\!\_\;}}
+ \begin{document}
+%\title{Developing Big-Data Application as Queries:\\  an Aggregate-Based approach}
+%a user-friendly unifying approach}
+%\author{Carlo Zaniolo,$\;$Ariyam Das,$\;$Jiaqi Gu,$\;$Youfu Li,$\;$ Mingda Li,$\;$Jin Wang\\
+%{\normalsize  University of California at Los Angeles}}\vspace{-0.1ex}
+ %\email{\{zaniolo,ariyam,youfuli,limingda,jinwang\}@cs.ucla.edu\vspace{-2ex}}}
+ 
+%\maketitle
+ %\inv\inv
+ \begin{abstract}
+Recent advances on query languages (QLs) and DBMS suggest that their traditional role
+ in   application development can and should be extended   dramatically  in 
+ many big-data application areas, including graph, machine learning and data mining applications.
+This  is made possible   by the  superior expressive power that 
+database aggregates bring to  recursive queries  and the realization of their 
+powerful  non-monotonic semantics via  efficient and scalable fixpoint-base
+operational semantics.  Thus, in this paper, we discuss how 
+ classical  algorithms can be expressed concisely using queries with aggregates in recursion 
+that have a rigorous declarative semantics. Then we discuss what modifications, if any, are 
+ needed on such programs to have an efficient and scalable fixpoint-based operational semantics,
+ whereby we can also identify  queries that are conducive to 
+ bulk-synchronous and  stale-synchronous parallelism. 
+\end{abstract}
+\section{{\large  \bf Introduction}}
+Relational DBMS and their logic-based  QLs made possible for programmers to develop
+applications without having to navigate   database 
+storage structures via statements written in a procedural language. 
+Many initial skeptics notwithstanding, relational DBMS  proved quite effective  in terms
+of usability, performance and  scalability.  In fact their success led to and was reinforced by
+significant extensions, including the introduction 
+of very powerful aggregate functions, such as OLAP functions that enable direct support
+for descriptive analytics by SQL queries. Another important extension was the  SQL support for  recursive queries
+which allows  simple algorithms, such as transitive closure, to be expressed directly as  queries.
+However, the quantum leap in expressive power achievable  by  combining recursive queries 
+with aggregates was never realized  because of  SQL stratification requirement,
+which specifies that non-monotonic constructs can be applied to the results of 
+recursive definitions but cannot be used in the recursive definitions. This
+requirement was  then enforced to avoid the major semantic problems faced by recursive reasoning
+via non-monotonic constructs. However, significant progress was made since then
+ by researchers  focusing on the use of aggregates in  AI,  logic programming and Datalog: 
+ for instance, the concept of Stable Models has gained wide acceptance as the formal basis
+ for declarative semantics  in the logic programming arena~\cite{gl:stable} \cite{DBLP:journals/tplp/GelfondZ14}.
+So far, however, these advances  did not have much  impact upon the database field because
+of two main issues. 
+The first issue is that the  non-constructive definition of  Stable Model Semantics (SMS)  for programs with negation is making 
+difficult for programmers to show that their queries with aggregates 
+satisfy  SMS, and the second issue is that  establishing the SMS for a program does not guarantee its efficient
+constructive realization, and significant re-writing of the original program is often needed to 
+implement it via fixpoint computations and  the recursive query implementation techniques of SQL DBMS, 
+as well as Datalog systems.
+
+In this paper, we describe an approach that addresses these two issues and proved successful in a number of advanced 
+applications~\cite{bigdatalog,bigdatalog-mc,rasql,afrati2011map,rasqldemoSigmod20,datalogml,kddlog}. 
+We will start with an intuitive  treatment of the declarative SMS  of
+ recursive queries with  extrema,  and show that queries with count, sum and average can
+ be reduced to queries with max. Then, we provide simple criteria to detect when
+the SMS of such queries can be turned directly into an efficient and scalable fixpoint computation
+and when these instead require   significant rewriting  by the techniques described in the paper.
+While in our examples we use Datalog programs, we will show how these can be expressed using
+SQL queries for which the same conclusions apply. Throughout the paper, we will refer to 
+queries and programs as synonyms.
+
+\section{{\large \bf Stable Model Semantics and Fixpoint Computation for Programs with Extrema}} \label{ex:stratified}
+
+A  simple application of extrema in recursive queries consists in finding the min or max distance
+from a given initial node $\tt a$ of all  nodes in the graph where the edges have positive length.
+The following program, computing max distances,  exemplifies  key semantic issues.
+
+\sinv \begin{example} [{\it A stratified program to compute the max distance from $\tt a$}  ]~\\[-0.4cm]
+ \bldl
+ \pfact{r_1: dist(a, 0).}{ }
+   \prule{r_2: dist(Y,  Dy)}{dist(X, Dx), arc(X, Y,  Dxy),  Dy{=}Dx{+}Dxy.}
+    \prule{r_3: mxdist(Y,   max \langle Dy \rangle)}{dist(Y, Dy).}
+   \eldl
+ \end{example}
+ 
+\sinv Assume for instance that we have the following fact base that describes an acyclic directed graph: 
+ \inv $$\tt ~~~ arc(a, b, 10) ~~~arc(a, c,  20)  ~~~arc(b, c, 18)  ~~~arc(c, d, 12)$$
+
+\sinv Then, the {\it semi-naive fixpoint} computation on the first two rules derives the following new atoms at each step
+(whereas the {\it naive fixpoint} includes the atoms produced at previous steps along with those produced at this step):\\
+
+\sinv\inv\begin{center}
+
+\begin{tabular}{|c  |c | c | c |}
+\hline
+  Step~1 & Step~2  &  Step3 &  Step 4 \\
+$\tt ~~dist(a, 0)~~$ & $\tt dist(b, 10), ~~dist(c, 20) $ &$\tt  dist(c, 28), ~~dist(d, 32)$ & $\tt  dist(d, 40)$\\
+\hline
+\end{tabular}
+\end{center}
+
+ \noindent With the computation on the first two rules having reached fixpoint, rule $\tt r_3$ is applied next, whereby  Step~5
+ produces $\tt ~mxdist(a, 0)$,  $\tt ~mxdist(b, 10)$,   $\tt ~mxdist(c, 28) $,  and $\tt  ~mxdist(d, 40)$,  while 
+$\tt mxdist(c, 20)$ and $\tt mdxist(d, 32)$ are not derived since they are dominated  by 
+the previous atoms\footnote{We say that $\tt atom(X1, Y1)$ dominates $\tt atom(X2, Y2)$ when
+ $\tt X1=X2$~ and  $\tt Y1 >Y2$.} and thus  they are not maximal.
+ 
+ 
+ Our stratified derivation can be optimized by pushing  the max constraint into recursion, while keeping the
+ original stratification whereby the fixpoint computation of $\tt dist$ by rules $\tt r_1$ and $\tt r_2$ must be completed
+ before  $\tt r_3$ can be used to derive $\tt mxdist$. 
+
+
+\inv\begin{example} [{\it {\it Using max in recursion to compute the max distance from $\tt a$}  }]~\\[-0.4cm]
+\label{ex:premopt}
+    \bldl
+ \sinv  \pfact{r_1: dist(a, 0).}{ }
+   \prule{r_2: dist(Y,  max \langle Dy \rangle)}{dist(X, Dx), arc(X, Y,  Dxy),  Dy{=}Dx{+}Dxy.~~~~~~~~~}
+    \prule{r_3: mxdist(Y,   Dy )}{dist(Y, Dy).}
+   \eldl
+ \end{example}
+ 
+\sinv  The semi-naive fixpoint computation  of our rules \rof{1} and \rof{2} so revised
+produces atoms that are dominated by other atoms produced at later steps.
+These non-maximal atoms are called  {\em provisional max} atoms, and they are depicted  as cancelled
+in the picture below, since they will be lost at later steps.
+
+\sinv\begin{center}
+
+\begin{tabular}{|c  |c | c | c |}
+\hline
+  Step~1 & Step~2  &  Step3 &  Step 4 \\
+$\tt ~~dist(a, 0)~~$ & $\tt dist(b, 10), ~~\cancel{dist(c, 20)} $ &$\tt  ~~dist(c, 28), ~~\cancel{dist(d, 32)}$ & $\tt  dist(d, 40)$\\
+\hline
+\end{tabular}
+\end{center}
+%The $\tt dist(\f--, \f--)$ 
+%Atoms that are not provisional   called {\em final max} atoms. 
+Max (min) atoms that are not provisional are called {\em final} max (min) atoms.
+Then, with the fixpoint computation for $\tt dist$  completed Step~4,  \rof{3} at Step 5  simply renames  the final max atoms so obtained 
+ producing
+ $\tt ~mxdist(a, 0)$,  $\tt ~mxdist(b, 10)$,   $\tt ~mxdist(c, 28) $ and $\tt  ~mxdist(d, 40)$.
+
+The minimal model of  a monotonic program can be derived by an  {\em eager} computation
+that, at each step, derives all the possible consequences of the current interpretation. A derivation that at each step only
+derives a non-empty subset of those consequences will be called {\it judicious}.  Then,  we have that
+ {\it  a program with extrema has $M$ as its stable model  iff
+$M$  can be derived via a judicious derivation that contains no provisional atom}~\cite{submitted}.  
+
+
+For instance, the stratified derivation shown for Example~1 is a judicious one since the fixpoint computation of $\tt dist$
+by rules \rof{1} and \rof{2}  produces no provisional atom, and  \rof{3}  then  selects from the atoms so generated
+the final max $\tt mxdist$ atoms. Indeed, the iterated fixpoint computation of every max-stratified program defines a
+judicious computation that produces its stable model.
+
+On the other hand, although the eager  computation in Example~2 contains  provisional atoms,
+it still computes the stable model of our program. Indeed, after all those provisional atoms 
+are cancelled during the fixpoint computation, we  have a valid judicious derivation for the 
+stable model of our program.  Programs that have this property will be said to be {\it resilient}.
+The program in Example~2 is resilient.
+
+The requirement that programs must have SMS is now widely accepted  in the field because otherwise
+programs might not have sound logic-based semantics, as illustrated by the following example.
+Say, for
+ instance, that  users are only interested in nodes whose
+distance from $\tt a$  along the longest path is  $\tt <40$, and they add  the condition  $\tt Dy {<}40$  to  
+$\tt r_3$ in Example~\ref{ex:premopt}. The modified program is still stratified  and returns $\tt ~dist(a, 0)$,  $\tt ~dist(b, 10)$,   $\tt ~dist(c, 28) $
+$\tt  dist(d, 40)$ and  $\tt ~mxdist(a, 0)$,  $\tt ~mxdist(b, 10)$,   $\tt ~mxdist(c, 28) $, which defines its stable model. \\[-0.3cm]
+
+\noindent
+However,   if $\tt Dy{<}40$  is added to $\tt r_2$, instead of  \rof{3}, then the  eager
+computation  generates the following derivation:\\[-1.6cm]
+
+\begin{quote}~\begin{example} [{\it Eager computation for Ecample~2 after $\tt dist(c, 20)$ is added to \rof{2}}]
+~\\[-0.2cm]
+%\begin{center}
+
+\begin{tabular}{|c  |c  | c |}
+\hline
+  Step~1 & Step~2  &  Step~3 \\
+$\tt ~~dist(a, 0)~~$ & $\tt dist(b, 10), ~~\cancel{dist(c, 20)} $ &$\tt  ~~dist(c, 28), ~~dist(d, 32)$\\
+\hline
+\end{tabular}
+\end{example}
+\end{quote}
+%
+\sinv Then in Step~4,~ \rof{3} derives from these: $\tt mxdist(a, 0)$, $\tt mxdist(b, 10),$ $\tt  mxdist(c, 28), mxdist(d, 32)$.\\
+The logical problem with  this outcome is that 
+the  atom ~$\tt dist(c, 20) $ is no  longer in the result;   thus, there is no justification for 
+$\tt dist(d, 32)$  and $\tt mxdist(d, 32)$  to be  in the answer.
+
+Therefore, for  Datalog programs with aggregates to produce  logically sound  results, the programs
+must  have SMS. We  will  first discuss how  to achieve this objective for programs
+with max and min,  and then for programs with count, sum and average whose formal semantics
+is actually defined using max.
+
+\paragraph{Pre-Mappable Extrema and Stable Model Semantics:}
+In our previous examples, we have seen that an eager fixpoint computation produces 
+a stable model for some queries but not for others.   Thus programmers need simple criteria to 
+guarantee that their programs belong to the  first group (i.e., they are resilient) and  the notion of  pre-mappable   (\prem)  constraints 
+\cite{DBLP:journals/tplp/ZanioloYDSCI17} is introduced next to satisfy this requirement. 
+
+The mapping defined by a set of rules in a program is called their Immediate Consequence Operator (ICO) 
+and it is  denoted by $T$.
+Then, the constraint $\gamma$ is said to be pre-mappable ($\!$\prem{\bf)} to
+ $T$  when, for every interpretation $I$ of
+ $P$, we have that: $\gamma(T(I)) = \gamma (T(\gamma (I)))$.
+ 
+ For instance,  in rule  \rof{2}  of Example~1,  to find  the
+ maximal $\tt Dy$ for a given $\tt Y$, we only need to consider the max $\tt Dx$ value for the $\tt X$ value that,
+ via  $\tt arc(X, Y, Dxy)$, produces that $\tt Y$.
+  Thus, in Example~2, the constraint $\tt is\_max(Y, Dy)$ applied to
+ the head of \rof{2} can pre-applied to $\tt  dist(X, Dx)$ in the body of the rule, and from there to 
+ the rules generating  $\tt  dist(X, Dx)$ in the previous step of the fixpoint computation without changing 
+ the results of the fixpoint computation. This \prem property  allows us to transform  Example~1 into Example~2
+with assurance that the same $\tt mxdist$ results will be obtained.
+More recently, it was proved~\cite{submitted} that \prem also guarantees that  recursive programs with extrema
+satisfying \prem have a SMS that can be computed using the fixpoint techniques now used in the efficient implementation of
+recursive queries by SQL and Datalog systems. 
+General conditions for  \prem to hold is a given program were discussed in \cite{DBLP:conf/amw/ZanioloYIDSC18}.
+
+The \prem property provides a very useful sufficient condition for
+ recursive queries with aggregates to have a declarative SMS that can
+ be computed quite efficiently using the techniques currently used 
+ for monotonic queries.  Nevertheless, many queries  have SMS 
+ although they do not satisfy \prem$\!\!.$
+For instance,  consider Example~2 with  $\tt Dy \!<\!40$ added to \rof{2}. 
+Then, instead of using an eager derivation we can omit  deriving  $\tt dist(c, 20)$
+at Step~2, and derive $\tt dist(c, 28)$ at Step~3: this completes a judicious derivation
+free of provisional atoms that thus delivers its stable model.  In this revised program, the \prem property is lost and and
+ eager fixpoint derivation does not produce its stable model, whereby other techniques,
+ such as those discussed in the next sections are needed to compute it.
+
+\sinv\paragraph{Programs with MIN.}
+The formal properties of programs with min can be derived by duality from those of programs with max
+and imply that  many min programs of practical interest  have SMS. For instance, if we revise our examples
+to use min instead of max,  we find that \rof{2} still satisfies \prem after the addition of  $\tt Dx \!< \! 40$, and therefore
+an eager fixpoint computation can be used to compute its stable model.  Moreover, the presence
+of cycles of positive length  in $\tt graph(\f--, \f--)$ does not compromise the SMS of our min programs, since the second time
+a node $\tt Y$ in the cycle is visited during  derivation, its larger $\tt Dy$ value is discarded, 
+whereas  in max  queries larger values turn previous values into provisional ones.  
+ A wide  range of classical graph algorithms can be expressed concisely 
+ using aggregates in recursive  rules that  have the \prem property  and are thus
+ conducive to efficient and scalable implementations~\cite{bigdatalog,bigdatalog-mc,rasql,rasqldemoSigmod20}.
+In fact, along with other optimization techniques, the  semi-naive fixpoint can be extended to programs with extrema,
+with the simple provision  that the new atoms generated  at each step will
+replace any provisional atom they dominate.
+%\paragraph{Seminairve fixpoint}
+
+\inv\section{{\large Semantics of Programs Using the Continuous Count and Final Count Aggregates}}
+
+\sinv 
+ The OLAP functions of SQL  introduced the 
+ continuous count aggregate 
+which returns all positive integers up to the cardinality of the set. 
+ Continuous count will be denoted by $\tt mcnt$, since it is monotonic in the lattice
+of set containment, i.e. if $\tt S1 \subseteq S2$ then $\tt mcnt(S1) \subseteq mcnt(S2)$.
+The  final count $\tt f\!cnt$ that computes the cardinality of  a set
+can be expressed as the max of the monotonic count on the set.
+For instance, with  $\tt bintbl(\f--, \f--)$ denoting an arbitrary binary table the following rule 
+computes the cardinality of the set of
+distinct  $\tt Y$-values associated with a group-by value $\tt X$:
+
+\inv\inv\inv\begin{equation}
+\tt r: mcagr(X, mcnt\langle Y \rangle)  \leftarrow ~ bintbl(X, Y).
+\end {equation}
+%In our rule, we have used the symbol $\tt f\!cnt $ do denote the final count, whereas the
+% the continuous monotonic count  is denote by $\tt mcnt$. 
+ The semantics of this rule is as follows:
+\sinv\begin{definition} [{\it Defining  the semantics of continuous monotonic count $\tt mcnt$}   \inv]
+\label{def:gbfcount}
+~\\[-0.4cm]
+\cldl
+\prule{r_{a}: mcnt(X, 0)} {bintbl(X, \f--).}
+ \prule{r_{b}: mcnt(X,  C1)}{ mcnt(X,  C), bintbl(X,Y),  onenext(Y, (X), C), C1=C+1.~~~~~}
+\prule{r_{c}: mcagr(X, max\langle C \rangle)}  {mcnt(X, C).}
+\eldl
+ \end{definition}
+ 
+ The predicate  $\tt onenext(Y, (X), C)$ guarantees that, for each group-by value $\tt X$ , each 
+value $\tt Y$ is counted exactly once. In Datalog  this can be expressed by replacing 
+ $\tt onenext(Y, (X), C)$  in \rof{b} with the pair of goals $ \tt choice((X,C), Y), choice((X, Y), C)$,
+since programs that use the choice construct have SMS~\cite{DBLP:conf/pods/GrecoZG92}.
+ In the actual implementations,  the use of the  $\tt get\_next$ construct, that visits the tuples in $\tt bintb$
+exactly once,  guarantees that this constraint is never violated. Also observe that the zero count assigned
+by \rof{a} is  always eliminated by \rof{c}. Thus the  semantics of the final count that compute the 
+cardinality of the set can now be defined using $\tt mcnt$ and $\tt max$. For example, the semantics of the following rule:
+\inv \cldl
+\prule{f\!cagr(X, f\!cnt\langle Y \rangle)} {bintbl(X, Y).\inv}
+\eldl
+\inv is defined by the following two rules:
+\cldl
+\prule{(a): magr(X, mcnt\langle Y \rangle)} {bintbl(X, Y).}
+\prule{(b): f\!cagr(X, max\langle C \rangle)} { magr(X, C).\sinv}
+\eldl
+% \noindent With max the only non-monotonic
+%construct used in the definition of $\tt fcnt$ we observe similar  SMS patterns.
+%Observe how this 
+%definition uses  the predicate  $\tt new$ to prevent  duplicate counting of  $\tt Y$-values
+%associated with  the same value $\tt X$---thus, duplicate $\tt [X,Y]$  pairs are ignored.  Definition~2 creates,
+%for each group-by value $\tt X$, lists  containing  the permutations of the values of $\tt Y$ associated with this $\tt X$.
+%This definition is logically correct since all permutations produce the same count result, a property that
+%is then exploited in the optimized computation performed by the system, which wil
+%use only the permutation  that is most efficiently retrieved, e.g. the one derived
+%according to the order in which the data is stored~$\!\!$\footnote{
+%E.g., by  the $\tt get$-$\tt next$ primitive supported in vintage Database Systems.}.  
+%Furthermore, the \prem property  allow us to  apply  $\tt max$ in \rof{b}, whereby 
+%only  $\tt X$ value is kept at each step for each $\tt Y$ value, as it is done in the actual implementation.
+%Thus, we 
+%have here a fully declarative logic-based semantics that is then  optimized into the very efficient
+%operational semantics  used at  the system level.\\[-0.1cm]
+% This  synergistic combination of the strengths of
+%declarative and operational semantics is what we seeks to achieve
+%for all programs that use aggregates, including the  situations where aggregates
+%are used in  recursive  rules.
+%$ \tt choice((X,C), Y), choice((X, Y), C)    onenext(Y, X, C).$
+
+
+\paragraph{\bf A  Bill of Materials  (BoM)  Example.} $\!\!$Here,  $\tt ~basic(Part, Cost)~$
+is  the price charged by the supplier of a  part. 
+%\footnote{Example  \ref{ex:sssprime}   can also
+%be re-expressed using only two rules without affecting its SMS properties.}:
+ \begin{example}[$\tt basic$ {\it describes the cost of basic parts, and $\tt arc$ defines  the part-subpart graph}]
+
+~~
+
+$\tt  ~~~~~~~~ basic(a,6.2).~ basic(b, 9.4).~ basic(c, 13.2).~ basic(d, 4.8).~ basic(e, 4.8).$
+
+~~~~~~~~$\tt arc(a,f).$ $\tt ~arc(b, f).~ arc(c,f).~ arc(c,g).$ $\tt arc(d,g).~ arc(e,g).~arc(f, g).~$
+\end{example}
+
+~\\[-0.5cm]
+%\begin{example}[Days,  in excess of 10, needed for  all components of an assembly to be delivered]
+%\label{ex:wait1}
+%\inv\inv\cldl
+% \prule {\rho_1: wait(Part,Days)}{basic(Part,  Days).}
+% \prule{\rho_2:  wait(To, D1 )}{ wait(Frm, Days),  D1{=} Days+1, arc(Frm, To), is\_max(To, D1).}
+% \prule{\rho_3:  mxwait(Part, Days)}{wait(Part, Days), Days \geq 10.}
+% \eldl
+% \end{example}
+Assume now that we introduce the (somewhat artificial) notion of complex assemblies  as those which are
+assembled from three or more components which are either basic parts  or complex
+subassemblies. Then the following query returns the complex assemblies in our BoM.
+
+\sinv \begin{example}[{\it Find the  assemblies and the total count of basic parts they contain when this is $\geq 3$}]
+
+ \label{ex:count}
+\cldl
+ \prule {\rho_1: cassb(To,  3)}{basic(To, \f--), C=3.}
+ \prule{\rho_2:   cardc(To, fcnt\langle  Frm \rangle)}  {cassb(Frm, \f--),  arc(Frm, To).}
+ \prule{\rho_3:  cassb(To, Totcnt)} { cardc(To, Totcnt),  Totcnt \geq 3.}
+ \eldl
+\end{example}
+The semantics of this program is defined by the following program obtained by expanding  $\rho_2$ into  rules
+$\rho_{2a}$ and $\rho_{2b}$ that express
+the computation of  $\tt f\!cnt$ aggregate via $\tt mcnt$ and $\tt max$:\\[-0.1cm]
+
+ \begin{example}[{\it  Defining the  semantics of $\tt f\!cnt$ in Example~5  as the $\tt max$ of $\tt mcnt$.} ] 
+ \label{ex:countbis}
+\inv\sinv\cldl
+ \prule {\rho_1: cassb(To,  2000)}{basic(To, \f--).}
+ \prule{\rho_{2a}:   cardc(To, mcnt\langle  Frm \rangle)}  {cassb(Frm, \f--),  arc(Frm, To).}
+\prule{\rho_{2b} :   mxcard(To, max\langle C \rangle)} {  cardc(To, C ).}
+ \prule{\rho_3:  cassb(To, Totcnt)} { mxcard(To, Totcnt ),  Totcnt \geq 3.}
+ \eldl
+\end{example}
+
+%Thus $\tt onenext(To, C, Frm)$  is predicates that assure that, for a certain group-by To, and for each only one
+%value From is selected and this is a new value never selected before.  In Datalog this can be expressed
+%using the choice construct, that is available under SMS,  whereby $\tt nextone( C, To, Frm)$ can be re-written as 
+%$\tt choice(To, From), choice({To, C), Frm$.  Alternative ways to express the same constraint using lists have been proposed in \cite{xxx}.
+%Most important, though,  the getnext construct used in the systems performs the same function whereby every node
+%from is only considered once and as it is considered the count of its successors To in the BoM graph is incremented.
+
+The max aggregate is the only non-monotonic construct in this program.  Therefore, to achieve SMS, we must find
+a judicious derivation that does not produce any provisional max.  One such derivation could e.g. use
+$\rho_1$ and $\rho_{2a}$ to produce
+$\tt cardc(f, 3)$  and  $\tt cardc(g, 3)$.    At this point, our judicious derivation produces $\tt mxcard(f, 3)$ but not $\tt mxcard(g, 3)$.   
+Then, from  
+$\tt mxcard(f, 3)$  we derive   $\tt cassb(f, 3)$.  From this, we derive  $\tt cardc(g, 4)$, which yields $\tt mxcard(g, 4)$ 
+and $\tt cassb(g, 4)$. Since this derivation has produced no provisional max, SMS is guaranteed. On the other 
+hand, an eager computation woud have used  $\tt cardc(g, 3)$ to produce $\tt mxcard(g, 3)$ 
+before deriving $\tt mxcard(g, 4)$ and  $\tt cassb(g, 4)$, which  remove the provisional  $\tt mxcard(g, 3)$
+but not   $\tt cassb(g, 3)$.   Thus we cannot use  the eager fixpoint technology of our current systems
+to compute the stable model for this program. As we look for a solution, we see that
+there is a  simple one that consists in  revising  $\rho_3$ into the
+following rule:
+\sinv \inv\cldl
+\prule{~~~~~~~~\rho'_3:  cassb(To, max\langle Totcnt \rangle)} { mxcard(To,  Totcnt ),  Totcnt  \geq 3.\sinv}
+\eldl
+
+The {\it max-enhanced} version of the program so obtained  has the same SMS as the original program
+and its   eager fixpoint computation produces its stable model, thus we will say that our program is {\it quasi-resilient}.
+While many programs of interest are quasi resilient, others are not, and no max enhancement will deliver their SMS.
+For instance, say that we add the additional 
+goal  $\tt Totcnt {<}4$;  then,  the stable model for this program contains   $\tt cassb(f, 3)$,  
+but it does neither contains $\tt cassb(g, 3)$ nor $\tt cassb(g, 4)$. However the
+fixpoint of its max-enhanced version now contains $\tt cassb(g, 3)$. Thus  the max-enhancement here
+neither preserves the original SMS  nor it  makes it resilient.  To address this situation,  users
+must be provided with (i)  criteria to recognize programs that can  be max-enhanced into equivalent 
+programs that are resilient, and (ii)  more general implementation methods for programs that have a SMS
+but do not belong to group (i). The notion of {\em Reverse Premappability} (R\prem)  provides a simple answer
+to (i).  With  $T$  denoting the  the ICO of one or more rule,  we will say that R \prem  holds for $T$ if
+$\gamma(T(I)) = T(\gamma(I))$ for every $I$.  Since  \prem holds for  max in rule $\tt \rho_3$,
+max can be introduced into this rule  without changing the result; indeed, 
+ it  only enforces the max constraint on atoms generated from rule $\tt \rho_{2b}$, i.e. atoms that already
+satisfy the max constraint. However if we instead use rule  $\tt \rho'_3$, then   a max atom,   such as  $\tt mxcard(g, 4)$
+obtained from    $\tt \rho_{2b}$, will be filtered out by the $<4$ condition,
+ whereby  $\tt \rho'_3$ will now return $\tt mxcard(g, 3)$ as max: a clear violation of SMS.
+Therefore, to realize  the SMS for the program with the ${<}4$ condition, we need
+different solutions, such as the one that relies on the   {\it pre-counting}  technique discussed in the next section.
+ 
+ \paragraph{\bf  Dealing with Duplicates.}
+ Duplicates are immaterial for extrema because of their
+idempotence property, but not for the other aggregates a special notation 
+is needed to specify that duplicates are not excluded from the computation.
+Say for instance that we have
+a  ternary table $\tt terntbl(A1, A2, A3)$ and for each value of $\tt A1$ we would like  to count all occurrences 
+of $\tt A2$, where every occurrences of  $\tt A2$ associated with different 
+$\tt A3$ value contributes to the count. Then, instead of the following rule,
+\inv\begin{equation}
+\tt  dbagr(X, f\!cnt\langle [Y, Z] \rangle)  \leftarrow ~ terntbl(X, Y, Z). \sinv
+\end {equation}
+we can use the rule (3) below with the special duplicate notation that will also be used for sum and average:
+\inv\begin{equation}
+\tt dbagr(X, f\!cnt\langle Y, Z \rangle)  \leftarrow ~ terntbl(X, Y, Z).
+\end {equation}
+
+~\\[-1.8cm]
+
+\section{{\large Queries Using Sum and Average.}}
+\sinv  
+The semantics of the sum of the elements in a set can be specified by 
+adding up its elements while counting them so that  the sum value
+associated with the final count can be returned.\footnote{Using the max of the continuous count
+on the set elements does not identify their sum when negative numbers are present.}
+
+
+Consider for instance the following example that for each assembly derives the total of the costs of the basic
+parts it uses, by adding up those of its subparts. The notation $\tt sum\langle  Cost, Frm \rangle)$ denote that
+duplicate  $\tt Cost$ from different subparts $\tt Frm$ all contribute to the sum.\\[-0.4cm]
+\begin{example}[{\it For each assembly, find the total  cost of  the basic parts it uses}] 
+ \label{ex:cost}
+ 
+ ~\\[-0.2cm]
+\cldl
+ \prule {\rho_1: pcst(To, Cost)}{basic(To, Cost).}
+ \prule{\rho_2:  ragr(To, sum\langle  Cost, Frm \rangle)}
+{pcst(Frm, Cost),  arc(Frm, To).}
+ \prule{\rho_3:  pcst(To, Cost)} {ragr(To, Cost).}
+ \eldl
+\end{example}
+Now,  the computation of $\tt sum\langle  Cost, Frm \rangle$  requires (a) an initial step where
+count and sum are initialized to zero, (b) an iterative step that adds one to the current count and adds
+the new $\tt Cost$ to the current sum, and (c) a final max step that selects the final count, which 
+is used to return the final sum value associated with it.
+
+%Thus this query can be re-expressed in the following way:
+% \begin{example}[{\it Expressing the previous example using the continuous sum value associated with the final count}]
+%\inv\sinv\cldl
+% \prule {\rho_1: pcst(To, Cost)}{basic(To, Cost).}
+% \prule{\rho_2:  ragr(To, fcnt\langle  Cost, Frm \rangle, msum\langle  Cost, Frm \rangle)}
+%{pcst(Frm, Cost),  arc(Frm, To).}
+% \prule{\rho_3:  pcst(To, Cost)} {ragr(To, Cost).}
+% \eldl
+%\end{example}
+
+%The special
+%notation $\tt sum\langle  Cost, Frm \rangle$ in $\tt \rho_2$ is used to 
+%$\tt Cost$ values are included in the computation if they are  associated with different $\tt Frm$ values.
+%Thus,  both the  $ \$ 4.8$  cost of basic part  $\bf d$ and the
+%$\$ 4.8$ cost of basic part $\bf e$  are  included in the computation of  the  sum   for $\bf g$.  
+%In $\tt \rho_3$ we have also added the condition $\tt CST <$ to assure termination just in case
+%that dirty data have created cycles in our graph.\\[-0.2cm]
+
+
+%\paragraph{\bf Sum in Recursive Programs} Let us study now  the declarative and operational semantics 
+%of programs that use sum in recursive computations. For instance, to add up the coast of
+%the basic parts contained directly or indirectly in a super-part, we can use the following program:
+%\vspace*{-0.2cm}~~
+
+
+%The declarative semantics of  this program can be specified by
+%its FOE which, for each  assembly $\tt To$, adds up the costs of its suparts $\tt Frm$,
+%while keeping count on  how many subparts were added so far, since 
+%the correct value of the sum is the one associated with the final max count.
+
+%in Example \ref{ex:thesum}  can be specified as follows:
+%The  sum of the elements in set  can be obtained aggregate is defined by assuming that, along with 
+%$\tt sum$, the $\tt fcnt$ aggregate is also computed, since the  value of the sum 
+%s returned when the count has reached its final value:
+ \begin{example}[{\it The max-based formal semantics for  Example \ref{ex:cost}}]
+ \label{ex:sumbis}
+\cldl
+ \prule {\rho_1: ~\; pcst(To, Cst)}{basic(To, Cst).}
+\prule{ \rho_{2a}: rsum(To, C, S)}{pcst(Frm, \f--), arc(Frm, To),
+ C=0,  S=0.}
+ \prule{ \rho_{2b}: rsum(To,C1, S1)\!} {pcst(Frm, Cst),  arc(Frm,To),  rsum(To, C, S),}
+\pbody{}{onenext(Cst, Frm, (To), C), C1{=}C{+}1 ,S1{=}S+Cst.}
+\prule{\rho_{2c}: ragr(To, max\langle C \rangle)}{rsum(To, C, \f--).}
+\prule{\rho_3:~\; pcst(To, Cst)} { ragr(To, Fcnt), rsum(To, Fcnt, Cst).}
+ \eldl
+\end{example}
+%
+To define the semantics of  average,  rule   $\rho_3$ above will be modified to return $\tt Cst/Fcnt$ instead
+of $\tt Cst$.
+
+As we now investigate the declarative and operational semantics of this example, we see that 
+we  can assume that no cycle exists in the BoM part-subpart graph,
+no provisional max value is ever generated by $\rho_{2c}$  and SMS is thus guaranteed.
+%Then for each node,  its correct  final count and sum can be computed as soon as this
+%information is available for all predecessors of the node. Then, with no provisional max value  generated
+%SMS  is guaranteed.   
+However, when it comes to operational semantics, the situation of sum is quite different from 
+that of count;  this can be easily seen by comparing 
+rule $\tt \rho_{2a}$ in Example \ref{ex:countbis}, where successive  count values are ignored by $\tt cassb(From, \f--)$, against
+rule $\tt \rho_{2a}$ in Example \ref{ex:sumbis} in which successive values are cumulatively added  incorrectly to the sum.
+Thus, except for
+special cases, such as that of perfectly balanced trees, an eager computation
+will not deliver the correct  sum value.
+%Observe, that the only non-monotonic construct  in this program
+%is max that is used to defined the count, whereby the existence of SMS
+%for this program follows directly from the absence of cycles in the 
+%underlying graph.  As we have previously seen, however,
+%SMS  does not guarantee their resiliency for more complex count programs,
+%and eager FPC cannot be used  for our program. This can be
+%his can be easily seen
+%by contrasting  the rules in  \ref{ex:maxcnt} against those in 
+%\ref{ex:thesum}.  In fact, as per the goal  $\tt inclub(From,  \f--)$ in $\tt r_{2b}$
+%of Example \ref{ex:maxcnt} the actual value of count is not used 
+% the actual non-zero value of the predecessor node is immaterial in the 
+% computation.  In our Example \ref{ex:thesum} instead, the 
+% second argument of $\tt pcst(Frm, Cst)$ in $\tt \rho_{2b}$
+% directly contributes to the sum. 
+To  realize SMS, we must therefore revise the original program to 
+ make sure that, for each node,  the $\tt Cst$ contributions of 
+its predecessors are added all at once. 
+ One technique to achieve that is  the  {\it pre-counting} approach used in~\cite{datalogml}
+ which will compute the sum at a node only after the sum is computed at each of
+ its immediate predecessors.
+% Toward this goal we have two solutions. The first is the layering 
+% solution used for count, and the other is cardinality pre-counting 
+% discussed next.
+To implement this technique, the program in Example \ref{ex:cost} is  revised
+into that in Example \ref{ex:below}, below,  by  the addition of
+rule $\bar{\rho_0}$ 
+that precomputes the in-degree of each node. Then, 
+$\tt \rho_2$  is modified into $\bar{\rho}_2$
+to keep count of the number of a node's immediate predecessors that have so far  contributed to its sum. 
+Thus, the correct final  sum value used in $\bar{\rho_3}$ is the one obtained when  count is  equal to the in-degree of the node.
+In passing, observe that  $\bar{\rho}_2$  also illustrates  how multiple aggregates sharing the
+same group-by value can be specified in the head of a rule.\\[-0.5cm]
+
+
+ \begin{example} [{\it Cost of nodes by pre-computing the number of their incoming arcs}]
+\label{ex:below}
+
+~\\[-0.7cm]
+
+\cldl
+ \prule {\bar{\rho}_0: indgr(To, f\!cnt\langle Frm \rangle )}{arc(Frm, To).}
+ \prule {\bar{\rho}_1: pcst(To, Cost)}{basic(To, Cost).}
+ \prule{\bar{\rho}_2:  ragr(To, sum\langle  Cost, Frm \rangle, f\!cnt \langle  Frm \rangle)}
+{pcst(Frm, Cost),  arc(Frm, To).}
+ \prule{\bar{\rho_3}:  pcst(To, Cost)} {ragr(To, Cost, NNods), indgr(To, NNods).}
+ \eldl
+\end{example}
+
+Thus we have now a program where  the eager FPC realizes its SMS,
+returning the same $\tt pcst(To, Cost)$ atoms as the original program.  
+Pre-counting  is also applicable to programs with count and average and
+ represents a simple technique to derive an efficient and scalable fixpoint computation for
+programs that have a declarative SMS. However, in the simple form we have discussed, pre-counting
+relies on the assumption that all the nodes are reachable form basic parts. When
+that is not the case, more complex programs could be used to compute the actual
+count of immediate predecessors of a node reachable form the basic parts. Alternatively, 
+the Group-by Layering  technique described  in \cite{submitted}  can be used   to avoid 
+the generation of provisional values, by delaying the derivation of each group-by node 
+ until a derivation step where the last of its predecessors is computed. In acyclic graphs, this step
+could be determined using topological sorting, but this requires a complex Datalog
+program and  implies the serialization of  nodes that could be computed in parallel.
+The technique described in ~\cite{submitted} instead computes for each node 
+its maximum distance  from $\tt basic$ nodes and is amenable to parallelism.
+
+\inv \section{\large Parallelism and Layered Computation.}
+\sinv  By applying pre-counting  on Example \ref{ex:cost},   we obtained Example~9  
+where the computation a new node is started only after it is completed at its
+predecessors. In many
+applications of interest, this kind  of revision  is not  needed since  the
+completion conditions that enable  the fixpoint computation  to realize SMS follow directly
+from the structure of the program and  the parallelization  strategy used by the system. 
+ Among such applications, we find those using algorithms such as Markov-Chains,  Lloyd's Clustering and Batch Gradient Descent.
+
+\inv\paragraph{\bf Markov Chains.} This algorithm is interesting because of its
+similarity to the Page Rank algorithm that led to Map-Reduce.
+ % and because  it provides an interesting situation where the sum 
+%is applied to a set of known cardinality,
+ Thus,  in Example \ref{ex:markov}, we assume a database of facts
+ $~\tt mov(Frm, To,  Perc)$,  where $\tt Perc$ denotes
+ the  fraction of population that every year relocates from city $\tt Frm$  to city $\tt  To$.  
+For each city, there is also a non-zero arc from the city back to itself showing the fraction of people who remain in the same city.
+Therefore, the sum of $\tt Perc$  for the  arcs leaving a city (i.e., a node) is equal to one. 
+ 
+Now, assuming that initially every city has a population of $100,\!000$ people we would like to
+ determine  how the  population evolves over the years.    Also  to assure termination, we stop the computation after
+ 999 steps (i.e., a number of steps that is normally sufficient  for the computation to either
+ converge to a final state or reveal that no convergence should be expected).
+ Then, we can use the following program, where  $\tt  sum\langle  In, Frm \rangle$
+  adds up the
+ $\tt In$  contributions from all $\tt Frm$ cities,  without discarding  duplicate  $\tt In$ values  coming from different $\tt Frm$ cities:\\[-0.1cm]
+
+ \begin{example}[The  Markov Chains algorithm]
+\label{ex:markov}
+\inv\inv \cldl
+\prule{\! \rho_1:markv(1, Cit, Pop)} {\!mov(Cit,  To, \f-- ), Pop= 100000.}
+\prule{\!\rho_2: next(J, To, sum\langle  In, Frm\rangle)}{\!markv(J, Frm, Pop),  mov(Frm, To, Perc),In = Pop {\times} Perc .}
+\prule{\! \rho_3: markv(J1,  Cit, Pop)}{\!next(J, Cit, Pop),  J\leq 999, J1=J+1.}
+\eldl
+\end{example}
+Observe that we have here a program that is locally stratified by the 
+value of the first argument in $\tt markv$, whereby SMS hold. The same conclusion
+follows by representing as a directed arc the dependency from 
+ the group-by arguments $\tt markv(J, Frm, \f--)$ in  $\rho_2$ to 
+$\tt markv(J1,  Cit, \f--)$ in the head of $\rho_3$. Since $\tt J1=J{+}1$ the
+graph so established is acyclic, and this provides yet another 
+proof that  declarative SMS holds.
+
+Now, for an operational semantics that correctly realizes the SMS of this program, we can observe that 
+the number of incoming arcs representing the population that
+migrate into a city each year remains the same, and thus we can use
+the pre-counting approach  previously described. Then, the  head
+$ \rho_2$ will be extended with an additional argument that counts the number of  contributions added so far.   
+Them,  $ \rho_3$  ignores the sum values  produced by $ \rho_2$, until the count argument 
+equals the pre-counted in-degree of the node. 
+The stable model for the program generated by this pre-computing transformation is  then computed by 
+the eager derivation  that is conducive to scalability via stale-synchronous parallelism \cite{ssp-iclp19,submitted}.
+
+However, other solutions are available and actually preferable 
+in Datalog systems that support more advanced operational semantics.
+ Indeed some Datalog compilers \cite{ldl++} will
+recognize the explicit local stratification that holds for the
+group-by argument in our rules, and arrange for an evaluation where  all computations at level
+$\tt J1{=}J{+}1$ are performed after
+the $\tt J^{th}$-level ones are completed. In these Datalog systems, the stable model for Example \ref{ex:markov} 
+can computed with no revision required in the program.
+The same conclusion holds for systems
+ designed to support bulk-synchronous 
+parallelism (BSP)  in which a new distribution-computation
+cycle at level $\tt J{+}1$  is not started  until the completion of the previous 
+cycle,  in which aggregates at group-by level $\tt J$ were evaluated. This approach achieves high parallel performance \cite{kddlog}.
+
+\inv\inv\paragraph{\bf Applications  Requiring a Combination of Different Aggregates.}
+%In the previous sections, we explored the semantic properties of  different  aggregates,
+%and applied them in different programs  to provide a concise formulations
+% for several  useful algorithms having SMS and efficient operational semantics.
+ Queries that combine multiple aggregates 
+can express concisely a  broad spectrum of advanced algorithms that support
+graph, data mining and ML applications with superior performance and scalability
+~\cite{seo2013socialite,wang2015asynchronous,bigdatalog,rasql,appl-iclp19,bigdatalog-mc,rasqldemoSigmod20,datalogml,kddlog}. 
+%Many of these applications rely on a combination of different aggregates
+%and the fact that they all share in their cardinality-based definition simplifies
+%the study of their formal semantics and the proof that their efficient and SSC-scalable
+%fixpoint produces a stable model.   
+For instance,  we next discuss  Lloyd's clustering algorithm  that combines sum, average and min aggregates.
+
+\paragraph*{\bf K-means Clustering:}
+ \label{sec:lloyd}
+ We are given a large set of D-dimensional points.  
+Each point is described by a unique $\tt Pno$ and its  coordinate values in each of the $D$
+dimensions, i.e., by $D$ facts conforming to the following template: $\tt point(Pno, Dim, Value)$. 
+We also have a small set of centroids,  for which we
+generate an initial assignment $\tt center(0, Cno, Dim, Val)$ 
+by the predicate $\tt init(Cno, Dim, Val)$  defined using  any of the
+simple techniques described in the literature.  Then,  Lloyd's clustering 
+algorithm can be expressed 
+concisely as shown in  Example~\ref{ex:lloyd}. 
+
+%\footnote{ We use  $\tt encd$  to concatenate 
+%two integers into a  double-length,  whereas and $\tt decd$ reconstruct from this  the original pair.
+%A recent generalization of extrema, called chained min and max \cite{kddlog} 
+%supports  this functionality as part of the aggregate.}.
+
+\sinv\begin{example} [Clustering a l\'a Lloyd.]
+ \label{ex:lloyd}
+ 
+ ~\\[-0.5cm]
+ 
+ \cldl
+  \prule{\!r_0:center(J, Cno, Dim, Val)}{\! init(Cno, Dim, Val), J=0. \hspace{2cm}}
+  \prule{r_1:cdist(J1, Pno, Cno, sum\langle SqD\rangle)}{\!point(Pno, Dim, Val) ,  center(J0, Cno, Dim, CVal).~~~~~~\sinv}
+  \pbody{} {SqD{=} (Val-Cval)*(Val {-} Cval), J1=J0+1.}
+  %\prule{r_2:isdist(J1, Pno, Cno,  DSm)}{cdist(J, Pno, Cno,  DSm), J1=J+1.\pin}
+  \prule{\!r_2:mdist(J2, Pno, min \langle  [DSm, Cno] \rangle)}{ cdist(J1, Pno, Cno,  DSm),J2=J1+1.} 
+  %encd(DSm, Cno, DCno),\sinv}
+ %\pbody{} {J1=J+1.}
+% \prule{r_4:mdist(J1, Pno, Dst)} {adst(J, Pno, Dist), J1=J+1.\pin}
+\prule{\!r_3:center(J0, Cno,  Dim, avg \langle Val, Pno\rangle )}{mdist(J2, Pno, [\f--, Cno]), points( Pno, Dim, Val),\sinv}
+ %[DmCno =  [\f--, Cno].} %\sinvdecd(DmCno, \f--, Cno), \sinv}
+\pbody{}{J2 \leq 999, J0=J2+1.\pinv}
+%\prule{r_6:center(J1, Cno,  Dim, Val)}{ncntr(J, Cno,  Dim, Val), J \leq 999, J1=J+1.}
+\eldl
+\end{example}
+At each step $\tt J$  Example \ref{ex:lloyd} computes the
+  quadratic distance of each point from each  centroid,  so that \rof{2}
+ can select for each point the centroid closest to it. Then,  for each centroid, \rof{3}
+recomputes its  position by averaging the coordinates of the points
+that have this as their nearest centroid\footnote{Thus min assume a total ordering where  $\tt  [X1, Y1] \leq [X2, Y2]$ holds if  
+$\tt X1< X2$ or if   $\tt X1=X2$ and $\tt Y1 \leq Y2$. This ordering is
+easily extended to lists of arbitrary length.}:
+
+This program is structurally similar to  the  Markov Chains  program  of Example \ref{ex:markov},
+and the two programs  have similar properties in terms of declarative  and operational semantics.
+In fact, the first argument in the heads of their rules  define an explicit stratification that implies SMS.
+Moreover, since the cardinality of   $\tt Pno$ and $\tt Cno$ sets remain constant throughout the computation,
+ we can use the pre-counting approach to construct the stable model by an eager fixpoint computation that
+ is conducive to SSP scalability. However, with bulk-synchronous parallelish (BSP) the SMS of this program can be realized
+ quite naturally and efficiently by simply  synchronizing the BSP steps with the 
+first arguments in the head of the rule, i.e., with $\tt J0$, $\tt J1$,  $\tt J2$.
+% of these two acyclic programs
+%can be derived in a similar way.    In fact,  explicit GBL program
+% whereby   from $\tt center$ atoms at level $\tt J$  we can only 
+%derive $\tt cdist$ atoms at level $\tt J+1$ and from those we can only derive $\tt mindist$ atoms at level
+%$\tt J+2$, and  from those  $\tt center$ atoms  at level $\tt J+3$.
+%Thus if we view aggregates as standard macros then the $t\omega$ computation 
+%provides a simple abstraction with the iterated fixpoint computation which
+%can e.g.  be used in testing and debugging actual programs. The aggregate computation
+%that takes place at this stratum is a recursive computation that realizes the SMS using
+%the specific fixpoint computations that we have defined for the various aggregates.
+% 
+This guarantees that the declarative and operational  semantics of our programs are
+ completely aligned and  conducive to  efficient implementations that are scalable via BSP.
+In fact, Lloyd's algorithm is among the several data mining algorithms implemented
+on Apache Spark using  Datalog with recursive aggregates. The 
+performance and scalability of these algorithms have undergone extensive
+experimentation, showing that they perform as well or better than 
+the same algorithms expressed by lengthy\footnote{For instance,
+the corresponding  procedural version requires  twenty-fold the
+lines of codes used in Example \ref{ex:lloyd}.} procedural-language programs~\cite{bigdatalog,bigdatalog-mc,rasql,afrati2011map,rasqldemoSigmod20,datalogml,kddlog}.
+%Furthermore, this declarative
+%approach to Big Data analytics and allows the adaptations and customizations
+%that are so frequently required in real-life applications.  
+%Indeed  the coupling of formal SMS with operational fixpoint semantics 
+%explored in this paper  shows that  Datalog with recursive aggregates represents a logic programming 
+%paradigm of superior expressive power and performance.
+
+\paragraph{\bf Expressing ML Applications}\label{subsec-express}
+The problem of supporting efficient and scalable  ML applications concisely expressed
+as Datalog queries with aggregates was studied in \cite{datalogml}. For instance, to support gradient descend, we
+can  use a verticalized representation   $\tt vtrain({Id},{C},{V}, {Y})$ for the
+ training set, where  $\tt Id$ denotes the id of a training instance, $\tt Y$ denotes its label, $\tt{C}$ and  $ \tt{V}$
+ denote the dimension and the value along that dimension, respectively. Then a Batch Gradient Descent application
+can be expressed by the program in Example \ref{ex:bgd} where
+\begin{description}
+	\inv\item [~~--~~$\tt model(J,C,P)$]   is the training model in verticalized form,  where
+	$\tt J$  is the iteration counter $\tt C$  is a dimension in the model, and $\tt P$ is the parameter value for that dimension.
+	\sinv\inv\item [~~--~~$\tt gradient(J,C,D)$]  contains the gradient result  $\tt G$  at  iteration  $\tt J$ for the ${\tt C}^{th}$ dimension.
+	\sinv\inv\item [~~--~~$\tt predict(J, Id, YP)$] represents the intermediate prediction results, where $\tt Id$
+	  denotes the id of the training instance, and $\tt YP$ its the predicted $y$ value at iteration  $\tt J$.
+\end{description}
+
+%Among these steps, the gradient computation and prediction with the current model can be easily represented with aggregates in recursion.
+%Therefore, the iterative training process can be expressed with a recursive Datalog program Query~2.
+Firstly, the model is initialized according to some predefined mechanisms in \rof{0} (Here we use  0.01). 
+Then the function $f$ is used to make predictions on all training instances according to the model obtained in 
+the previous iteration in  \rof{1}.
+Next the gradient is computed by the function $g$ (derived according to the loss function $L$) using the predicted results in \rof{2}.
+Finally, in \rof{3} the model is updated w.r.t the gradients (and optional regularization $\Omega$).
+Here, $lr$ denotes the learning rate and $n$ is the number of training instances.
+Then, the training process moves on to the next iteration.
+\begin{example} [ Batch Gradient Descent (BGD)]
+\label{ex:bgd}
+~\\[-0.2cm]
+\cldl
+\prule{r_{0}:model(J, C, P)}{ vtrain(\_, C, \_, \_), J=0, P=0.01.}
+\prule{r_{1}:predict(J,Id, sum \langle Y0 \rangle) }{vtrain(Id, C, V, \_), model(J, C, P),Y0 = f(V, P), J1 {=} J {+}1.}
+\prule{r_{2}: gradient(J2,C,sum \langle G0 \rangle) }{vtrain(Id, C, V, Y), predict(J1, Id, YP),G0 {=} g(YP, Y, V), J2 {=} J1 {+}1.}
+\prule{r_{3}:model(J, C, NP) }{ model(J, C, P), gradient(J, C, G), }
+\pbody{}{NP = P - \emph{lr} * (G / \emph{n} + \Omega(P)), J {=} J3 {+}1.\sinv}
+\eldl
+\end{example}
+As in previous two examples, the $\tt J$ argument in the group-by establishes a structure that guarantees SMS 
+and superior scalability via BSP. The same is true for a wide spectrum of ML algorithms 
+that can be expressed with different functions $f$, $g$, $\Omega$ in above program.
+In particular, the Mini-batch Gradient Descent (MGD)  require only minor changes to above queries~\cite{datalogml}.
+
+~\\[-0.4cm]
+
+\section{Conclusion}
+
+\sinv The usage of aggregates in recursive Datalog programs  entails a concise expression for very powerful algorithms
+that combine a formal declarative SMS with a powerful and scalable fixpoint-based operational semantics.
+This paper has  unified the semantics of programs with different aggregates by  turning them all
+into equivalent programs with extrema,  and thus significantly simplified the verification of their SMS by
+reducing it to the exclusion of provisional extrema from the derivation.  Using the \prem property
+we  identified a large class of resilient or quasi-resilient  programs for which the current  implementation techniques
+used in Datalog provide an efficient and SSP-scalable implementation  of their SMS.  For programs
+that do not belong to this class, the paper proposed simple rewriting techniques, such as pre-counting
+to realign their operational semantics with declarative one. Finally in  many programs
+of practical interest, the synchronized execution produced by SSP also guarantees the correct derivation of their SMS.
+These findings suggest that many big-data algorithms that are now developed using procedural languages
+can instead be developed directly using  query languages, including SQL, 
+since recursive Datalog queries with aggregates, can be translated into equivalent  SQL queries,
+as discussed in the appendix. 
+
+%{\small
+%\bibliographystyle{plain}
+\bibliographystyle{ACM-Reference-Format}
+%\bibliography{mybib}
+%}
+
+
+\begin{thebibliography}{10}
+{\small
+\bibitem{afrati2011map}
+Foto~N Afrati, Vinayak Borkar, Michael Carey, et~al.
+\newblock Map-reduce extensions and recursive queries.
+\newblock In {\em EDBT}, pages 1--8. ACM, 2011.
+
+\bibitem{ldl++}
+Faiz Arni, KayLiang Ong, Shalom Tsur, Haixun Wang, and Carlo Zaniolo.
+\newblock The deductive database system {LDL++}.
+\newblock {\em TPLP}, 3(1):61--94, 2003.
+
+\bibitem{appl-iclp19}
+Ariyam Das, Youfu Li, Jin Wang, Mingda Li, and Carlo Zaniolo.
+\newblock Bigdata applications from graph analytics to machine learning by
+  aggregates in recursion.
+\newblock In {\em ICLP'19}, 2019.
+
+\bibitem{ssp-iclp19}
+Ariyam Das and Carlo Zaniolo.
+\newblock A case for stale synchronous distributed model for declarative
+  recursive computation.
+\newblock In {\em 35th International Conference on Logic Programming}, ICLP'19, 2019.
+
+\bibitem{gl:stable}
+M.~Gelfond and V.~Lifschitz.
+\newblock The stable model semantics for logic programming.
+\newblock In {\em Proceedings of the Fifth Joint International Conference and
+  Symposium}, pages 1070--1080. MIT Press, 1988.
+
+\bibitem{DBLP:journals/tplp/GelfondZ14}
+Michael Gelfond and Yuanlin Zhang.
+\newblock Vicious circle principle and logic programs with aggregates.
+\newblock {\em Theory Pract. Log. Program.}, 14(4-5):587--601, 2014.
+
+\bibitem{DBLP:conf/pods/GrecoZG92}
+Sergio Greco, Carlo Zaniolo, and Sumit Ganguly.
+\newblock Greedy by choice.
+\newblock In Moshe~Y. Vardi and Paris~C. Kanellakis, editors, {\em Proceedings
+  of the Eleventh {ACM} {SIGACT-SIGMOD-SIGART} Symposium on Principles of
+  Database Systems, June 2-4, 1992, San Diego, California, {USA}}, pages
+  105--113. {ACM} Press, 1992.
+
+\bibitem{rasql}
+Jiaqi Gu, Yugo Watanabe, William Mazza, Alexander Shkapsky, Mohan Yang, Ling
+  Ding, and Carlo Zaniolo.
+\newblock Rasql: Greater power and performance for big data analytics with
+  recursive-aggregate-sql on spark.
+\newblock In {\em {ACM} {SIGMOD} Int. Conference on Management of Data, SIGMOD
+  2019}, 2019.
+
+\bibitem{kddlog}
+Youfu Li, Jin Wang, Mingda Li, Ariyam~Das an~Jiaqi~Gu, and Carlo Zaniolo.
+\newblock Kddlog: Performance and scalability in knowledge discovery by
+  declarative queries with aggregates.
+\newblock {\em International Conference on Data Enginering, {ICDE}}, 2021.
+
+\bibitem{seo2013socialite}
+Jiwon Seo, Stephen Guo, and Monica~S Lam.
+\newblock {SociaLite}: {Datalog} extensions for efficient social network
+  analysis.
+\newblock In {\em ICDE}, pages 278--289. IEEE, 2013.
+
+\bibitem{bigdatalog}
+Alexander Shkapsky, Mohan Yang, Matteo Interlandi, Hsuan Chiu, Tyson Condie,
+  and Carlo Zaniolo.
+\newblock Big data analytics with {Datalog} queries on {Spark}.
+\newblock In {\em SIGMOD}, pages 1135--1149. ACM, 2016.
+
+\bibitem{datalogml}
+Jin Wang, Jiacheng Wu, Mingda Li, Jiaqi Gu, Ariyam Das, and Carlo Zaniolo.
+\newblock Formal semantics and high performance in declarative machine learning
+  using datalog.
+\newblock {\em VLDB J.}, 2021.
+
+\bibitem{rasqldemoSigmod20}
+Jin Wang, Guorui Xiao, Jiaqi Gu, Jiacheng Wu, and Carlo Zaniolo.
+\newblock {RASQL:} {A} powerful language and its system for big data
+  applications.
+\newblock In {\em {SIGMOD} 2020 Int. Conference on Management of Data}, pages
+  2673--2676. {ACM}, 2020.
+
+\bibitem{wang2015asynchronous}
+Jingjing Wang, Magdalena Balazinska, and Daniel Halperin.
+\newblock Asynchronous and fault-tolerant recursive datalog evaluation in
+  shared-nothing engines.
+\newblock {\em PVLDB}, 8(12):1542--1553, 2015.
+
+\bibitem{bigdatalog-mc}
+Mohan Yang, Alexander Shkapsky, and Carlo Zaniolo.
+\newblock Scaling up the performance of more powerful datalog systems on
+  multicore machines.
+\newblock {\em {VLDB} J.}, 26(2):229--248, 2017.
+
+\bibitem{submitted}
+Carlo Zaniolo, Ariyam Das, Youfu Li, Mingda Li, and Jin Wang.
+\newblock Declarative and operational semantics for datalog programs with
+  aggregates.
+\newblock In {\em Submitted for Publication}, pages 1--15, 2021.
+
+\bibitem{DBLP:journals/tplp/ZanioloYDSCI17}
+Carlo Zaniolo, Mohan Yang, Matteo Interlandi, Ariyam Das, Alexander Shkapsky,
+  and Tyson Condie.
+\newblock Fixpoint semantics and optimization of recursive {Datalog} programs
+  with aggregates.
+\newblock {\em {TPLP}}, 17(5-6):1048--1065, 2017.
+
+\bibitem{DBLP:conf/amw/ZanioloYIDSC18}
+Carlo Zaniolo, Mohan Yang, Matteo Interlandi, Ariyam Das, Alexander Shkapsky,
+  and Tyson Condie.
+\newblock Declarative bigdata algorithms via aggregates and relational database
+  dependencies.
+\newblock In {\em Proceedings of the 12th Alberto Mendelzon International
+  Workshop on Foundations of Data Management, Cali, Colombia, May 21-25,
+  2018.}, 2018. }
+
+\end{thebibliography}
+
+\appendix
+\section{Aggregates in Recursive  SQL Queries}
+
+The  single source shortest path  Datalog query of Example~1 can be expressed in SQL.
+
+\begin{example}[SSSP on base table:  $\tt edge(Src\!:int, Dst\!: int, Cost\!:double)$ by stratified SQL]
+\label{ex:apsp}
+
+~
+
+\begin{verbatim}
+WITH recursive sssp (Dst, Cost) AS
+  (SELECT "a", 0)
+   UNION
+  (SELECT edge.Dst, sssp.Cost + edge.Cost
+   FROM sssp, edge WHERE sssp.Dst = edge.Src)
+SELECT Dst, MIN(Cost) AS minCost FROM sssp GROUP BY Dst
+\end{verbatim}
+\end{example}
+\noindent
+To express the query of Example~2 by a compact representation, 
+we will assume that the aggregate columns, such as MIN(Cost) are implicitly
+grouped by the other columns  in  $\tt SELECT $: i.e., by $\tt Dst$ for the example at hand.
+
+\begin{example}[SSSP on base table:  $\tt edge(Src\!:int, Dst\!: int, Cost\!:double)$ by unstratified SQL]
+
+~
+\begin{verbatim}
+WITH recursive sssp (Dst, min(Cost) AS minCost GROUP BY Dst) AS
+  (SELECT "a", 0)
+   UNION
+  (SELECT edge.Dst, sssp.minCost + edge.Cost
+   FROM sssp, edge WHERE sssp.Dst = edge.Src)
+   SELECT Dst, minCost FROM sssp 
+\end{verbatim}
+\end{example}
+
+Similar translations apply to the other  examples and aggregates discussed in the paper, with the provision 
+that the keywords {\tt ALL} and {\tt DISTINCT} will
+be added to specify their behavior in the presence of duplicates.
+\end{document}
+
+
