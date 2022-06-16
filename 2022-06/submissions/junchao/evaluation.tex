@@ -1,0 +1,131 @@
+\section{Proof-of-Concept Evaluation}
+We now present an initial evaluation of our vision of \DualChain{} architecture,
+which we implement in the open-sourced \ResDB{} fabric~\cite{poe,geobft,rcc, 
+ringbft}.\footnote{For our proof-of-concept of \DualChain{} 
+architecture, we employ an experimental version of \ResDB{} with the codename of {\em NexRes} 
+(Next Generation \ResDB{}); this is an architectural rewrite of the \ResDB{} 3.0 
+(the latest stable version).}
+
+\begin{figure*}
+    \centering
+    \setlength{\tabcolsep}{1pt}
+    \begin{tabular}{cc@{\quad}cc}
+        \pbfttput&
+        \pbftlat\\
+    \end{tabular}
+    \vspace{-3mm}
+    \caption{Evaluating peak throughput and commitment latency attained by \pbft{} consensus in \DualChain{}.}
+    \vspace{-3mm}
+    \label{fig:performance_pbft}
+\end{figure*}
+
+\begin{figure*}
+    \centering
+    \setlength{\tabcolsep}{1pt}
+    \begin{tabular}{cc@{\quad}cc}
+        \EvalBatchTput{(a)}&
+        \EvalBatchLatency{(b)}&
+        \EvalMinerTput{(c)}&
+        \EvalMinerLatency{(d)}\\
+    \end{tabular}
+    \vspace{-3mm}
+    \caption{Evaluating \PoC{} throughput and average settlement latency with 
+    different difficulty (D), miners (M) and block batch size (B).}
+    \vspace{-3mm}
+    \label{fig:performance_poc}
+\end{figure*}
+
+{\bf Experimental Setup.}
+We use Oracle Cloud Infrastructure's VM.Standard2.8 architecture to deploy miners 
+and replicas ($16$ cores, \SI{8.2}{Gbps} bandwidth, $120$ GB Memory). In our 
+experiments, we generate $400$ million client requests of size \SI{64}{B} each,
+while client response has size \SI{17}{B}. We average results over three runs.
+We require clients to sign their messages using \texttt{ED25519} while replicas use 
+\texttt{CMAC}.
+
+{\bf Batching.}
+We employ the standard practice of batching client transactions, which we refer to 
+\textit{transaction batching}, to optimize the \pbft{} consensus. Additionally, during 
+the \PoC{} consensus, each miner aggregates multiple batches from \pbft{} consensus, '
+which we refer to \textit{block batching}, prior to mining. 
+
+ 
+{\bf \pbft{} Scaling.}
+In Figure~\ref{fig:performance_pbft}, we gauge the peak throughput and 
+\textit{commitment latency} incurred by the \pbft{} consensus of our \DualChain{} 
+architecture. This is an important metric as it informs the rate at which we 
+can reply to the clients. For this experiment, we increase the number of replicas 
+from $16$ to $120$ and require the primary to process a batch of $100$ 
+transactions per consensus; transaction batch size is set to $100$. 
+As expected, on increasing the number of replicas, there is a drop in peak 
+throughput and an increase in incurred latency, which remains in the subsecond 
+range. This phenomenon occurs because, at each setting, we are approximately 
+hitting the network bandwidth; as the number of replicas increases, more messages 
+are communicated per consensus. In summary, the peak throughput reaches well 
+over \SI{800}{k} transactions/second at $16$ replicas while sustaining over 
+\SI{100}{k} transactions/second even when scaling to as many as $120$ replicas.
+
+
+{\bf \PoC{} Scaling.}
+Next, we study the impact of our \PoC{} consensus protocol on the \DualChain{} 
+architecture. We deploy $120$ replicas for running \PBFT{} consensus. For the 
+\PoC{} setting, we set the solution space parameter to $42$ nonce bits and 
+split it into equal disjoint slices based on the number of miners. Notice that 
+the difficulty of each problem is the number of leading zeros in the hash. In 
+Figure~\ref{fig:performance_poc}, we present our results; here $D$ refers to 
+difficulty (with the default of $D=9$), $M$ refers to the number of miners 
+(with the default of $M=120$), and $B$ refers to the number of batches in a block. 
+As stated earlier, for every $B$ blocks produced by \PBFT{} a single block is 
+notarized and minted by \PoC{}.
+ 
+In Figures~\ref{fig:performance_poc}(a) and~\ref{fig:performance_poc}(b), 
+we fix the number of miners to $120$, which allows creating $120$ equal slices, and 
+increase the block size from \SI{120}{k} to \SI{280}{k}. We test at two 
+difficulty levels: $D=8$ and $D=9$. Our results indicate that $D=8$ is 
+relatively easy, due to which each miner has to perform a smaller amount 
+of work. As a result, any increase in batch size does not increase peak 
+throughput. Hence, we test on $D=9$ at which mining smaller batch size 
+impacts the system throughput as miners have to participate in a larger 
+number of consensus rounds. On further increasing the block size, 
+we observe that the throughput hits the \PBFT{}'s peak as desired. Thus, 
+notarizing the blocks by \PoC{} no longer hinders the system throughput, 
+it only prolongs the \textit{settlement latency} as expected. 
+%
+When examining the end-to-end system throughput of \DualChain{} which 
+includes both \PBFT{} and \PoC{}, we observe a sustained throughput 
+of \SI{105}{k} with a commitment latency of $1$ second and the settlement 
+latency of $198$ seconds when the batch size is set to \SI{200}{k}. 
+{\em Note:} We could not test at difficulty beyond $D=9$ as each nonce 
+computation became prohibitively time- and resource-intensive given 
+our available commodity hardware.
+
+In Figures~\ref{fig:performance_poc}(c) and~\ref{fig:performance_poc}(d), 
+we gauge the performance of \PoC{} when there are $64$ to $120$ miners. 
+For these experiments, we also test at three different block batch sizes. 
+As expected, the degree of collaborative mining is directly proportional 
+to the number of miners. As we increase the number of miners, there is an
+increase in peak throughput and a decrease in the settlement latency.
+
+
+%In our experiments, we realize \mo{as expected not we realized} that when 
+%the mining time is always smaller than the transaction producing time, 
+%the miners will be always waiting for the transactions before they start 
+%the \PoW{}. In this case, the \PoW{} throughput will be the same as the 
+%\PBFT{} throughput. For example, it is much easier to find out the 
+%solutions when we set the difficulty as eight. When we set up BBS larger 
+%than 80K which will need 1.5 minute to fulfill in our \PBFT{} setting 
+%but the mining latency is less than 1.5 minutes, the miners are idle 
+%at most of the time. The throughput is consistence.  Thus, the throughput 
+%will always be around (see  $\ref{fig:performance_poc}$). We also found 
+%when we increase BBS to 120K, the throughput for difficulty nine will 
+%also be around 100k. Due to the limitation of computation resource, 
+%we are not able to evaluate the performance of difficulty ten.
+%
+%\mo{add the precise stats that justify our choice, for example, on 
+%average solving puzzle with 9 leading zeros requires 3.724789943 minutes with 
+%2 minutes standard deviation, which is why this block range make 
+%sense} 
+ 
+
+%\mo{for caption text, please see our earlier paper for more standard 
+%formats.}
