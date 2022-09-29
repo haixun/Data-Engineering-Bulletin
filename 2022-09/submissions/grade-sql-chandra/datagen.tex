@@ -1,0 +1,109 @@
+\section{Using Datasets to Check Correctness}
+\label{sec:datagen}
+Test data generation in XData is done based on the correct queries provided by the instructor. Unlike fixed datasets that are query agnostic, these datasets are designed to catch errors based on the correct queries provided by the instructor and are hence much better at catching errors. 
+
+\subsection{Common Errors in SQL Queries}
+Students make several types of errors when writing SQL queries. Some students may use an inner join when a left outer join was required, others may use a count aggregation when a count distinct was needed. Mutation testing is a well-known approach to check the adequacy of test cases for a program~\cite{mutation}. We use a similar approach for mutation testing of SQL queries.  We consider mutations as (syntactically correct) changes to an SQL query. Errors made by student queries may be seen as mutations of the correct query and the incorrect query is called a non-equivalent mutant of the correct query. A dataset that produces different results on the correct and incorrect queries is said to kill the mutation. 
+
+XData produces multiple datasets. The first dataset is aimed to produce a non-empty result for the query. This dataset itself kills several mutations. For the remaining datasets, XData considers single mutations at a time on the correct query provided by the instructor and generates datasets that are targeted to kill the mutations. Each dataset is marked with a tag to indicate which type of mutations a dataset is designed to catch. Note that a dataset designed to catch one type of mutation may catch other types of mutations as well. 
+
+XData considers a large number of mutations in SQL queries including but not limited to the following.
+\begin{itemize}
+    \item \textbf{Join type mutation}: A join type mutation involves replacing one of \smalltt{\{INNER, LEFT OUTER, RIGHT OUTER\} JOIN} with another.  Since the same join query may be written using different join orders, XData considers mutations across different join orders. Mutations involving missing or additional join orders are also considered. 
+%XData nullifies each join condition separately.
+
+    \item \textbf{Selection predicate mutation}: For selection conditions, XData considers mutations of the relational
+operator where any occurrence of one of  \{$=, <>, <, >, \leq, \geq$\} is replaced by another or if the selection condition is missing. XData also considers mutations of selection predicates between \texttt{IS NULL} and \smalltt{NOT IS NULL} and for missing \smalltt{IS NULL}. These predicates may be on integer, floating, text attributes or even aggregates. Mutations involving changing the constant in the selection condition are also considered. 
+    \item \textbf{Aggregation mutation}: Aggregations may be either unconstrained (at the root of the query tree) or constrained (having a condition with the aggregate). In both cases, the aggregation function can be mutated among \smalltt{MAX, MIN, SUM, AVG, COUNT} and their \smalltt{DISTINCT} versions. 
+    Mutations involving \smalltt{COUNT(attr)} to \smalltt{COUNT(*)}, in case \smalltt{attr} is nullable, are also considered. 
+    \item \textbf{Group by attribute mutation}: For queries involving the \smalltt{GROUP BY} clause, XData considers mutations involving additional or missing group by attributes both in the presence and absence of the \smalltt{HAVING} clause. 
+    \item \textbf{Like operator mutation}: Like operators are used in SQL to match patterns in text attributes. SQL like operators include \smalltt{LIKE, NOT LIKE, ILIKE and NOT ILIKE}. XData considers mutation of any one SQL like operator to other like operators. XData also considers mutations in the patterns used with the LIKE operator such as replacing as '\%' with '\_' and vice versa or missing '\%' or '\_' in the pattern.
+    \item \textbf{Nested subquery mutations}: XData considers mutations between \smalltt{IN} $vs.$ \smalltt{NOT IN}, \smalltt{EXISTS} $vs.$ \smalltt{NOT EXISTS} and \smalltt{ALL} $vs.$ \smalltt{ANY/SOME}. Mutations on the queries in the nested subquery are also considered for test data generation so that errors inside subqueries are also caught. 
+    \item \textbf{Set operator mutations}: Set operators are used in compound queries to combine the results of two underlying results. Set operator mutations include changing one of the following operators to another: \smalltt{UNION, UNION ALL, INTERSECT, INTERSECT ALL, EXCEPT, EXCEPT ALL}. Similar to nested subqueries, mutations of the subqueries whose results are input to these set operators are also considered. 
+    \item \textbf{Distinct mutation}: Duplicates in the results may be filtered using the \smalltt{DISTINCT} clause. XData considers mutations of a missing or extraneous \smalltt{DISTINCT} clause.
+\end{itemize}
+
+\subsection{Test Data Generation to Detect Errors}
+For each type of mutation, we design specific conditions that the datasets must satisfy in order to kill such mutations. Let us take the following example query to demonstrate the mutations considered for queries with join and selections and how we generate datasets to kill the mutations.
+
+\smalltt{\tabsql SELECT course.course\_id\\
+\tabsql FROM course INNER JOIN takes USING(course\_id)\\
+\tabsql WHERE course.credits >= 6}
+
+Some of the mutations that XData would consider and the techniques to kill those are the following. 
+
+\begin{enumerate}
+\item \textbf{Join type mutation}: Consider the
+mutation from department INNER JOIN course to
+department LEFT OUTER JOIN course. In order to
+kill this mutation, we need to ensure that there is a
+tuple in department relation that does not satisfy the
+join condition with any tuple in course relation. The
+INNER JOIN query would not output that tuple in
+the department relation while the LEFT OUTER
+JOIN would.
+
+In general, a join query can be specified in a join order
+independent fashion, with many equivalent join orders for a given query. Hence, the number of join type
+mutations across all these orders is exponential. From
+the join conditions specified in the query, XData
+forms equivalence classes of $<$relation, attribute$>$
+pairs such that elements in the same equivalence
+class need to be assigned the same value to meet
+(one or more) join conditions. Using these equivalence
+classes, XData generates a linear number of datasets
+to kill join type mutations across all join orderings.
+If a pair of relations involve multiple join conditions
+\item \textbf{Selection Predicate mutation}: For killing mutations for the selection condition A1 relop A2, XData
+generates 3 datasets where tuples satisfy the conditions (1) A1 $>$ A2, (2) A1 $<$ A2,
+and (3) A1 $=$ A2. These three datasets kill all non-
+equivalent mutations from one relop to another relop. These datasets also kill mutations because of missing
+selection conditions. 
+
+For the given query example the constraints would be (1) \smalltt{course.credits>6}, (2) \smalltt{course.credits<6} and (3) \smalltt{course.credits=6}. If the student query uses a different operator instead of $>=$ or misses the selection condition one of the three datasets will catch the error.
+\end{enumerate}
+
+Details on test data generation for killing other types of mutations are presented in \cite{xdata:vldbj15}. We omit the details here for brevity. 
+
+It is not sufficient for only the conditions for killing mutations to be satisfied when generating the test database. The difference at one level, say the join condition must change the result of the query for the difference to be observed in the query result. For the given example query, consider the join mutation. If all tuples in course have grade less than 6, both the \smalltt{INNER JOIN} and the \smalltt{LEFT OUTER JOIN} would give empty results. Hence, when generating a dataset, XData ensures that the tuple has \smalltt{grade >= 6}. 
+
+In order to generate a dataset, we generate constraints using an SMT solver~\cite{smt}. In XData, we support CVC3~\cite{CVC3}, CVC4~\cite{CVC4} as well as Z3~\cite{z3} as the constraint solvers. We encode text attributes as enumerates types and enumerates types are modeled as subtypes of integers or rationals. A tuple type is created for each relation to represent one row and an array of tuples represents the relation table. We also add other database constraints such as primary key and foreign key constraints, unique attribute constraints as well as domain constraints. The domain constraints ensure that we generate the correct types of values for each column of the database, the values generated are within the range specified by the schema and only nullable columns can have NULL values.
+
+
+
+We also note that some mutations may be semantically equivalent to the correct queries and it may not be possible to kill such mutations. For such cases, the constraints for killing the mutations would not be satisfiable and the SMT solver would fail to generate the dataset to kill the mutation.
+
+For the given query, a simplified version of the constraints, to generate the dataset that produces a non-empty result would be as follows (assuming none of the columns are nullable).
+\begin{verbatim}
+%Data definition
+DATATYPE course_id = CS-101 | BIO-301 | CS-312 | PHY-101 END;
+credits:TYPE = SUBTYPE (LAMBDA (x: INT): x > 1 AND x < 11);
+course_tuple_type:TYPE = [course_id,credits];
+course: ARRAY INT OF course_tuple_type;
+
+%Primary key constraints
+ASSERT FORALL(i:course_index, j:course_index): 
+       course[i].0 = course[j].[0] => course[i].1 = course[j].1
+
+%Foreign key constraints
+ASSERT FORALL(i: takes_index):
+       EXISTS (j: course_index): takes[i].1 = course[j].0;
+
+%Query conditions
+ASSERT course[1].0 = takes[1].1;
+ASSERT course[1].1 >= 6;
+\end{verbatim}
+
+To support nullable columns, we add additional values (outside the domain of the column) for the datatype that correspond to NULL values and explicitly mark those as NULL values. 
+Also, in practice, we found that unfolding the constraints (i.e., specifying the constraints for each tuple instead of FORALL, NOT EXISTS) gives us much better performance~\cite{xdata:icde11}. We decide the number of tuples upfront and assert the constraint on each tuple. 
+
+\subsection{Evaluating Correctness of Student Queries}
+The dataset generation for each correct query is done once across all students. Based on the datasets generated, XData compares the results of each student query and each correct query provided by the instructor. If all results of the student query are found to match that of a correct query, the student query passes that correct query.
+
+When an instructor specifies multiple correct queries, XData allows the instructor to specify one of the two options 
+\begin{itemize}
+    \item The additional queries were added to provide more coverage and better testing and all correct queries are equivalent. The student query will need to pass all correct queries for it to be marked as correct. 
+    \item The question test provided by the instructor was ambiguous and there could be multiple interpretations of the correct result. In this case, the student query will be marked correct if it passes any one of the correct queries. 
+\end{itemize}
+
+The XData system ensures that student queries are safely executed on a different database using temporary tables to ensure that their queries do not interfere with the main database or that the queries of one evaluation do not interfere with another. 

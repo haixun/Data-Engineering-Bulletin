@@ -1,0 +1,78 @@
+%!TEX root=../2022_IEEE_DEB_Vizier.tex
+
+\section{Multimodality}
+\label{sec:multimodality}
+
+As noted in \Cref{sec:vizier-history}, cells in Vizier implement a variety of different modalities, including scripting languages (e.g., Python, Scala), query languages (e.g., SQL), as well as graphical widgets for data ingestion, transformation, and curation (e.g., Load Dataset, Pivot Table, Repair Key).
+We refer to the evaluation logic for each modality as \emph{cell command}.
+Each cell in a Vizier workflow identifies the command that should run to evaluate the cell, along with a set of arguments to that command.
+For example, the SQL cell (\texttt{sql.query}) takes two arguments: the text of a SQL query, and an optional name to materialize the result table as. In this section, we discuss how these modalities are implemented as cell types in Vizier. % and how they are presented in Vizier's notebook view.
+
+A command is defined by the following methods:
+(i) \textbf{schema}: Returns a schema for the arguments the command accepts;
+(ii) \textbf{summary(arguments)}: Returns a textual description of the behavior of the command when parameterized by the provided arguments;
+(iii) \textbf{dependencies(arguments)}: Returns the over-approximation of the set of names of artifacts read (resp., written) by the cell as parameterized by the provided arguments, or indicates that either or both bounds can not be computed; and
+(iv) \textbf{evaluate(arguments, context)}: Evaluates the cell on the command, parameterized by the provided arguments and a context object.
+
+The context object on which commands are evaluated provides a read/write interface to the global scope and a way to emit messages to be displayed alongside the cell in the notebook view.
+As we discuss in \Cref{sec:vizier-workflows}, the global scope maps artifact names to artifact versions.
+Artifacts are not persisted directly as part of the global scope, but rather are references to our write-only artifact store.\footnote{As mentioned before, artifact versions are immutable in Vizier which simplifies version management. We leave optimizations that selectively violate this policy and update artifacts or store deltas instead of creating full updated versions of artifacts to future work.}
+When a cell implementation writes an artifact through the context, the artifact version is serialized and written into the artifact store.
+The artifact store assigns the artifact (version) a unique identifier, which is then saved into the scope.
+Similarly, to read an artifact, a cell implementation first reads the artifact identifier out of the scope, and then accesses the corresponding artifact version from the store.
+
+
+%\subsection{Language APIs}
+% \mypara{Language APIs}
+Cells implementing runtimes for general-purpose languages need to provide users of those languages with a way to interact with the global notebook state.
+This entails (i) providing a mechanism to reference the scope and import artifacts within a language-specific format, and (ii) predicting how the user-provided code will interact with the state to bound provenance.
+
+\mypara{Python}
+%
+Python cells are evaluated in an independent interpreter to avoid concurrency bottlenecks from the global interpreter lock (GIL).
+Thus, a key challenge is minimizing the volume of state transferred into and out of each interpreter.
+Global scope is lazily loaded by populating the global state with a set of proxy objects, one for each artifact in the scope. % We discuss this based on the example of Python and SQL cells.
+%
+% When a variable is accessed, the proxy object is ``hydrated'' from the artifact store; From that point on, the proxy object routes all function invocations, property accesses, and operator overload invocations to the hydrated artifact.
+% Several small values, including primitive constants and module references, are not compatible with proxy objects, but are small enough to allow them to be hydrated in all cells with negiligible performance cost.
+%
+Access to the Vizier context for messaging and artifact access occurs through a control bus that, by default, operates over the python process' standard input and output streams.
+% Python's normal standard output and error streams are overridden and any output over these channels is converted into control messages; Standard input is disabled for the user-provided script.
+Vizier defines a special `show' command within the module to produce structured messages (analogous to placing an item on the last line of a Jupyter cell).
+The show command includes support for most Vizier-defined types, matplotlib and bokeh plots, and provides fallbacks using the Jupyter-standard \texttt{\_repr\_html\_} method, or direct stringification as a final resort.
+% Vizier also discourages direct file IO by overriding the \texttt{open} command to print a warning message.
+%
+For predictive dependency tracking, and to identify variables that are modified, Vizier relies on Python's \texttt{ast} module, which provides an introspective compilation and code analysis framework.
+Vizier performs lightweight dependency analysis~\cite{DG22} to bound the cell's read and write dependencies.
+
+% identify variables accessed or modified by the cell's code.
+% This analysis is used both to bound the read and write dependencies, as well as to determine which variables are exported into the global scope at the end of the cell.
+% The AST module is also used to extract code for exported function, module, and class symbols.
+
+\mypara{SQL}
+%
+SQL cells are parsed and evaluated by Apache Spark.
+% Spark provides a convenient global catalog, allowing access to named functions, tables, and other values.
+% However, because the specific assignment of names to values varies depending on position in the notebook, relying on the global catalog is not thread-safe.
+% Instead,
+Vizier intercepts the parsed SQL query AST and manually injects references to the corresponding artifacts --- either datasets or python functions --- where needed.
+Spark-provided view name decorators make it possible for the injected views to retain their names from the query, avoiding incomprehensible error messages.
+The same injection logic is also used to statically identify exact read and write dependencies.
+
+% Spark has native support for Python User-Defined Functions, but this support is geared towards users accessing spark through its python frontend (\texttt{pyspark}).
+% Crucially, it relies on a customized serialization format (\texttt{cloud-pickle}) that is not portable across versions of the serialization library or python.
+% When Vizier identifies a reference to a python-defined UDF in a SQL query, it spins up a python interpreter, serializes the UDF, and caches it for subsequent use.
+
+% \mypara{Scala}
+% Scala cells are run directly within the Vizier JVM through the Scala reflection toolbox.
+% % This feature of Scala allows scala code to be compiled and evaluated at runtime; including support for access to global state.
+% % The evaluated code does not have access to local variables; Vizier works around this by passing state in through a thread-local global variable.
+% % Like Python cells, Vizier overrides the \texttt{print} and \texttt{println} methods to produce messages rather than standard out.
+% At present, access to global state in a scala cell occurs manually; A \texttt{vizierdb} object is created to allow cells to interact with the global scope, or to display more elaborate messages than text allows.
+% Similarly, at time of writing, dependency analysis is not yet supported.
+
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: "../2022_IEEE_DEB_Vizier"
+%%% End:

@@ -1,0 +1,199 @@
+%!TEX root=../2022_IEEE_DEB_Vizier.tex
+
+\section{Introduction}
+\label{sec:introduction}
+
+Interactions with data, whether by experts or less technical users, are frequently iterative.
+As the user explores and transforms her data, she regularly backtracks to correct mistakes, extend her work, or to update source data as it evolves.
+Throughout this process, users employ a variety of tools, each providing a unique \emph{data interaction modality}.
+For example, it is common for a data-centric workflow to involve some combination of a web browser (data discovery), a spreadsheet (quick statistics, minor data corrections, data entry), a database (batch manipulation and aggregation over large tabular data), a computational notebook (data visualization and model-building), a scripting IDE (modular component development), command-line tools (quick curation or summary tasks on simple data), and/or a business intelligence dashboard (data visualization).
+
+Each tool provides a unique interaction modality % that is ideally suited
+designed for specific tasks and skill levels, but less effective at others.
+Thus, users working with data frequently string together workflows out of multiple tools, taking the most convenient for each task at hand.
+Such manual orchestration % while not problematic at first,
+incentivizes bad habits that create challenges for reproducibility.
+It is also labor-intensive and error-prone because users have to translate data between the different formats expected by the tools they use, and must manually track provenance and manage documentation.
+% For example, the common pattern of multiple poorly named versions of a data set has achieved meme status~\footnote{\url{https://xkcd.com/1459}}.
+Manual orchestration of data-centric workflows % for data
+creates collections of workflow artifacts (e.g., datasets, code, and images) based on which it can be hard to (i) debug how a particular unexpected result was reached, or (ii) reapply the workflow when source data changes or if an error has been discovered %early
+in the workflow and was fixed by modifying the workflow. Automating such features for workflows that span multiple modalities and systems is a challenging problem that typically entails building an overarching system for the orchestration of workflows and requires changes to the individual systems used in a workflow.
+
+In this article, we outline the design of Vizier\footnote{\url{https://vizierdb.info}}, an extensible, multi-modal platform for data-centric workflows.
+At the core of Vizier is a computational notebook, analogous to Jupyter or Zeppelin, that serves to orchestrate workflows.
+Vizier distinguishes itself from these tools in two ways. 
+First, Vizier's modular architecture allows different interaction modalities to be built as views over the workflow encoded in the notebook. 
+This includes simple views over individual cells or data artifacts that expose data interaction modalities like spreadsheets, as well as more complex modalities for data debugging, data documentation, and more.
+Second, Vizier's feature-rich workflow engine supports automatic refresh of stale outputs, fine-grained provenance features like propagation of information about uncertainty in data and data documentation through workflow steps, and supports workflows encoding notebooks where the dataflow between cells is only learned at runtime.
+
+Vizier provides a simple workflow abstraction over which its extensible views are built: a workflow is a linear sequence of steps (called \textit{cells} by analog to computational notebooks) and  each step manipulates named, typed \emph{artifacts}.
+Crucially, in Vizier, cells are isolated from each other and communicate only through a shared API.
+All inter-cell interaction %in Vizier 
+takes place through cells reading and writing artifacts.
+This is in contrast to notebooks like Jupyter, where inter-cell interactions occur through the global state of an interpreter for a scripting language like Python.
+Vizier provides a streamlined mechanism for ensuring that workflow state (the versions of artifacts produced by the workflow) is re-computed when necessary.
+Each cell sees exactly those artifact versions that would be produced by executing all preceding cells in the order they appear in the notebook.
+The Vizier workflow engine also has built-in support for versioning workflows and artifacts. 
+Every edit to a cell results in a new workflow version being created and associated with the corresponding versions of the artifacts it reads and creates. 
+Both cells and artifacts are (conceptually) immutable and, as in functional data structures, an artifact or cell version can be shared by multiple versions of a workflow.
+
+% Over this simplistic data model, Vizier maintains a series of components to provide views access to (where possible) more intricaate views of the workflow, including:
+% (i) Workflow (i.e., coarse-grained) provenance between cells including the specific artifacts passed between cells,
+% (ii) Why and How (i.e., fine-grained) provenance between artifacts like datasets that support it, and
+% (iii) A historical record of how the workflow and the artifacts at corresponding points in the workflow evolved over time.
+
+%This article 
+In what follows, we describe the Vizier workflow engine, as well as several views built on-top of this engine, including Vizier's notebook interface, a spreadsheet mode for interacting with datasets, a history viewer, and a summary view for data errors.  We start with a motivating story of a user interacting with data.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{User Story}
+
+\newcommand{\takeaway}[1]{\begin{center}\Ovalbox{
+\begin{minipage}{0.9\textwidth}
+	\begin{minipage}{0.95\textwidth}\small
+		\textbf{Takeaway:} #1
+	\end{minipage}
+\end{minipage}}\end{center}}
+
+Alice is organizing several hundred student volunteers for a multi-day online event.
+She asks volunteers to complete an online form with details including name, institutional email address, and time zone.
+At some point, many, although not all volunteers have completed the form and she is able to access the results as a downloadable CSV file.
+The event organizer has asked for a plot summarizing volunteer availability at different times of day, based on each participant's time zone.
+The availability window for students in adjacent time zones overlaps, making this a challenging problem for spreadsheets, but trivially solvable in SQL (given a table of time zone to availability mappings).
+Alice downloads the CSV file, ingests it into a relational database, runs the query, exports the result, and imports it into
+%, e.g., 
+a spreadsheet to create a plot.
+It is convenient for Alice to use a mix of tools, because each tool is specialized for a particular subtask. However, she now
+% not the only approach open to Alice, using a mix of tools, each specialized for a particular subtask, requires 
+has to manually manage multiple versions of her dataset across the tools.
+
+\takeaway{Data science benefits from chaining together multiple data interaction modalities, including but not limited to Exploration/Discovery, Direct Manipulation, and Querying/Scripting.}
+
+She then discovers that some volunteers have submitted multiple responses via the form.
+Automated curation libraries or stand-alone curation tools \cite{ilyas-15-tcrd,DBLP:conf/chi/KandelPHH11} are usually sufficient to find and repair duplicate keys.
+However, the tool Alice selects %has difficulty dealing with 
+is not able to handle several responses where both the original and revised form submissions contain distinct typos, a fact she does not realize until later.
+
+\takeaway{Many data curation tasks like key repair can be automated, but uncertainty arising from heuristics needs to be tracked and communicated to users~\cite{YM15,kumari:2016:qdb:communicating}.}
+
+With each error corrected, Alice must return to the workflow and repeat all of the steps she previously performed so that she can generate a new plot that reflects these changes.
+
+\takeaway{Data workflows are developed iteratively; revisions to a prior step may require re-execution of subsequent steps to ensure that the results produced by these steps is up-to-date.}
+
+Alice's next task is to generate a credits page for the event's website, but she realizes that she has not asked the students to provide a home institution. Fortunately, using a Python script she can heuristically fetch institution names based on the domain name of the students' email address, by scraping the institution's website and retrieving the organization name from the web page metadata.
+Unfortunately, the script fails on a small number of unusual email addresses --- for example some institutions have a separate root domain name for student emails.
+Writing a script that fixes each outlier individually would be more effort than it is worth, so Alice opens the script output in a spreadsheet and manually enters institutions for the missing students.
+
+\takeaway{The 80/20 rule applies to data science: uncommon error are often easier to fix manually.}
+
+She then feeds the resulting spreadsheet into a new script that generates a credits page.
+As the credits page is posted, a new batch of form entries roll in and several students issue corrections.
+Now, not only does Alice have to manually re-evaluate her workflow, she also needs to manually merge her edits (made in the spreadsheet) with the updated outputs --- a tedious and error-prone process.
+
+\takeaway{Data science is continuous; workflows, whether containing manual steps or not, will inevitably need to be re-applied in new settings, e.g., when some of the input data is updated.}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Desired Interaction Modalities}
+
+Users interacting with data employ a mix of tools at each stage of a data-centric workflow's life cycle:
+(i) \textit{Discovery}, where users identify relevant datasets;
+(ii) \textit{Exploration}, where users become familiar with the data's structure and semantics, and identify potential problems;
+(iii) \textit{Curation}, where users address data problems, integrate data, and transform data into a desired form;
+(iv) \textit{Analysis}, where users answer questions and/or build models; and
+(v) \textit{Deployment}, where users refactor the workflow into a form suitable for automation and/or production use.
+We emphasize that progress through these stages is not monotone: users frequently identify errors or shortcomings, and go through a (vi) \textit{Debugging} process that usually results in a return to an earlier stage of development.
+
+\mypara{Artifact Manipulation}
+The first four stages primarily concern themselves with data \emph{artifacts} like datasets, machine learning models, and data visualizations.
+Depending on the specific task, users might interact with these artifacts through:
+(i) \textit{Scripts} in languages like Python, R, Scala, or SQL which are general-purpose tools that excel at bulk transformations that follow specific patterns;
+(ii) \textit{Direct Manipulation Interfaces} like spreadsheets that enable the user to directly inspect and manipulate the data, making them well suited for small datasets, quick one-off repairs, and data entry tasks; or
+(iii) \textit{Automated Tools} or libraries like command-line utilities, data curation and cleaning algorithms, and data visualizers that each perform one specific task (e.g., the creation or transformation of an artifact) sufficiently well to cover most usage.
+All of these modalities act on one or more source artifacts, and produce one or more output artifacts as a result.
+
+\mypara{Workflow Inspection}
+%
+All stages, but specifically the Debugging and Deployment stages, require a holistic view of the workflow:
+(i) \textit{Workflow Management} provides users with a way to trace back through their exploration process whether through a full workflow management system like Vistrails~\cite{DBLP:conf/visualization/BavoilCSVCSF05}, a notebook system like Jupyter, or a provenance capture system like CamFlow~\cite{DBLP:conf/cloud/PasquierHGMESB17} or ReproZip~\cite{DBLP:conf/tapp/ChirigatiSF13};
+(ii) \textit{Versioning} through revision control systems like GIT, or through `Track Changes' features allows users to trace back through time to earlier revisions of the data and workflows;
+% It is critical to note that there are two related, but distinct dimensions to this evolution: logical (over the course of the workflow), and temporal (over the evolution of the workflow itself)~\cite{DBLP:conf/tapp/NiuAGLKKG16}.
+% (iii) \textit{Fine-Grained Provenance} tools like Lipstick~\cite{DBLP:journals/pvldb/AmsterdamerDDMST11} or Caveats~\cite{YM15,FH19,FH21} provide a detailed view of the relationship between individual artifacts and their components;
+(iii) \textit{Automatic Data Documentation} tools like profilers,  inference of semantic types, and uncertainty trackers help users to understand and develop specific artifacts in the context of the broader workflow~\cite{kumari:2021:cidr:datasense, BS20, YM15, FH19, FH21}.
+(iv) \textit{Debuggers} and IDEs like PyCharm, or separate tools like PigPen~\cite{DBLP:conf/sigmod/OlstonRSKT08} give users a view of internal system state,  % as it is evaluating,
+helping them to trace forward through their code, and streamline the process of refactoring.
+A common theme to all of these modalities is that they provide a way for users to trace (whether forward or backward) through the execution of their workflow and its state.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Requirements}
+
+\newcommand{\requirement}[2]{\begin{center}
+	\vspace{-3mm}
+	\begin{minipage}{0.95\textwidth}
+		{\small
+			\textbf{Requirement #1:} \textit{#2}
+		}
+	\end{minipage}
+\end{center}\vspace{-2mm}}
+
+We now outline how the modalities exemplified in the prior section translate into concrete requirements for Vizier.
+To make our modularity goals concrete, we focus on extensibility in terms of support for new modalities for Artifact Manipulation, as well as Workflow Inspection.
+
+\mypara{Workflow Inspection}
+The first requirement is forced by the objective itself. % being able to inspect a workflow requires that there be a workflow to inspect.
+% A fully fledged workflow system may be overkill, but
+At a minimum we need a way to record the steps the user took to achieve her goal. %; this need not be a full workflow.
+
+\requirement{W1}{Vizier must be able to capture the steps (workflow) the user follows to produce an output artifact.}
+
+State, i.e., artifacts created / used by a workflow, plays an important part as well, and we need to track the evolution of state as it flows through the workflow (step versioning) and over the evolution of the workflow itself (workflow versioning).
+
+\requirement{W2}{Vizier must support versioned workflows and both step and workflow versioning of artifacts.}
+
+For each version of a workflow, there exist corresponding versions of artifacts produced by Vizier's workflow semantics (that we will introduce in \Cref{sec:solution-overview}). Vizier needs to ensure that artifacts are automatically refreshed to reflect the latest version of the workflow to avoid bugs and non-reproducible workflows~\cite{PM19}. % Efficiently invalidating stale artifacts requires tracking data dependencies between cells. Note that the user should not need provide this graph explicitly.
+% ; it suffices if we can infer it from what the user does provide.
+% Back-tracking carries a risk of changes to earlier steps of the workflow not propagating to all of the workflow's outputs, in turn leading to confusion, bugs, and non-reproducible workflows~\cite{PM19}.
+
+\requirement{W3}{Vizier needs to identify (and update) artifacts invalidated by a revision to the workflow.}
+
+% Efficiently invalidating stale artifacts, as well as tracking their evolution also requires a full dependency graph.
+% As before, we note that the user need not provide this graph directly; it suffices if we can infer it from what the user does provide.
+
+% \requirement{W4}{Vizier needs access to explicit inter-step dependencies in both logical and temporal dimensions.}
+
+\mypara{Artifact Manipulation}
+To provide a viable alternative to using a mix of tools in a data-oriented workflow that each implement one particular modality, Vizier has to be a platform that can host a multitude of modalities.
+% Our primary requirement flows from our central thesis that users working with data-oriented workflows require multiple modalities for interacting with their data.
+
+\requirement{A1}{Vizier must support multiple modalities for interacting with data artifacts}
+
+The remaining requirements arise from the diviersity of modalities.
+Crucially, we wish to decouple modalities from the semantics of the artifacts they create or manipulate.
+
+\requirement{A2}{Vizier needs standard data formats and APIs for exchanging artifacts between modalities.}
+
+% This standard should be general enough to allow our listed modalities, but also provide support (where possible) for treating artifacts as more than opaque containers.
+% In particular, where artifacts depend on each other (e.g., progressive transformations applied to a dataset), we would like these transformations exposed.
+% As mentioned before, uncertainty arises naturally in most data-oriented workflows and, if ignored, can severely impact the validity of analysis result{}s. The lack of support for uncertain data management in real systems is not due to a lack of need, but rather because of the inherently computational complexity of many uncertain data management problems.
+
+We want to allow users and automated workflow steps to attach annotations to artifacts or their component parts as a way to document uncertainty or ambiguity arising from the data or its preparation.
+% For example a column may be associated with a semantic type, or a field may be marked as having multiple values after a key repair.
+However, general purpose annotation management systems like Mondrian~\cite{GK05} or DBNotes~\cite{DBLP:conf/sigmod/ChiticariuTV05} do not take any annotation-specific semantics into account. 
+For example, we should not propagate an annotation marking a value $A$ as uncertainty that is  used in a computation $A \vee B$ if $B$ is guaranteed to be true.
+
+\requirement{A3}{Vizier should support the efficient propagation of annotations on the component parts of an artifact through annotation-specific semantics including semantics for uncertainty management.}
+
+Some modalities such as spreadsheets allow (manual) updates to data artifacts. 
+If the original data changes, then it should be possible to automatically re-apply these edits to the modified data.
+% Conversely, there are some constraints on the implementation of specific artifact manipulation modalities:
+% First and foremost, supporting iterative refinement of the workflow requires bi-directional interactions with the underlying workflow model; If the source data changes, the user should not need to manually redo their work.
+
+\requirement{A4}{Manual updates to an artifact must be re-applicable when the artifact is updated upstream.}
+
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: "../2022_IEEE_DEB_Vizier"
+%%% End:

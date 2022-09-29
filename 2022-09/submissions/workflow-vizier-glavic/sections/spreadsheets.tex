@@ -1,0 +1,52 @@
+%!TEX root=../2022_IEEE_DEB_Vizier.tex
+\section{Interactive Spreadsheets}
+\label{sec:spreadsheets}
+
+A key feature of Vizier is support for direct interaction with artifacts~\cite{BS20}, most notably a spreadsheet-like interface for interacting with Spark Data Frames.
+Spreadsheets provide a data exploration experience that is distinct from notebooks.
+Users are limited to a single dataset, but have significantly more flexibility when exploring the data.
+For example, it is common on small datasets (e.g., under 1000 rows) for users to complete preliminary data cleaning tasks like outlier detection, data integration, repair of typos and outliers, and even some limited computation (e.g., deriving new fields) in a spreadsheet prior to working with the data further (e.g., in a notebook).
+Another common use case is manual data entry; The user may enter the entire dataset, or may generate a data entry template (e.g., with a script) and import the resulting file into another tool.
+
+% In both cases, the relationship to the original dataset, and any consequent provenance information is lost.
+Vizier's spreadsheet interface is intended to provide a view over a subset of the notebook, allowing users to interact with the dataset in the appropriate modality, while simultaneously preserving workflow provenance  through interactions.
+% Furthermore, our goal is to present the spreadsheet as a View over a subset of the notebook.
+As the user interacts with the spreadsheet, their edits are reflected in the notebook as new cells.
+As the user edits the notebook, their edits are likewise reflected in the spreadsheet --- If the source data frame is updated in the notebook, Vizier attempts to re-apply the user's edits to the updated data.
+
+\mypara{Track Changes as a View}
+%
+To support bi-directional interaction between spreadsheet and notebook views, Vizier implements a series of specialized cell types that mimic SQL DDL and DML operations, allowing for inserting, deleting, or reordering columns and rows, or for updating individual cell values.
+We refer to the operations described by these cell types collectively as the Vizual language~\cite{FG16,BS20}.
+
+Vizual is based on the principle that the user's interactions with a database  can be modeled as views over an original version of the data.
+As prior work has shown, a view defined over a table can mimic the effects of any DDL~\cite{DBLP:journals/pvldb/CurinoMZ08} or DML~\cite{DBLP:journals/pvldb/NiuALFZGKLG17} operation applied to the table.
+Analogously, each Vizual cell in the notebook uses Spark's standard data frame manipulation language to apply a successive transformation to the dataset that mimics the user's interaction.
+To ensure that the spreadsheet remains responsive, a shim layer tentatively injects predicted updates to the user's interactions until the effects of the user's edit are fully applied~(e.g., as \cite{DBLP:conf/icde/GuptaDGUW09}).
+
+In SQL DML, update operations specify target rows by a predicate.
+By contrast, operations in a spreadsheet explicitly target specific rows of data, requiring Vizier to assign unique identifiers to each record to encode their order in the spreadsheet\footnote{We assume that the number of columns will remain manageable and reference them purely by name}.
+To allow Vizual operations to be replayed as source data changes, these identifiers should remain stable through data transformations.
+For derived data, Vizier uses a row identity model similar to GProM's~\cite{DBLP:journals/debu/ArabFGLNZ17} encoding of provenance.
+Derived rows, such as those produced by declaratively specified table updates, are identified by an appropriate combination of input tuple identifiers. For example, rows in the output of a join are identified by combining identifiers from the source rows that produced them into a single identifier, and rows in the output of a projection or selection use the identifier of the source row that produced them.
+% as follows:
+% (i) Rows in the output of a projection or selection use the identifier of the source row that produced them;
+% (ii) Rows in the output of a \texttt{UNION ALL} are identified by merging the identifier of the source row with an identifier marking which side of the union the row came from (note that this change renders the \texttt{UNION} operator non-commutative).
+% (iii) Rows in the output of a cross product or join are identified by combining identifiers from the source rows that produced them into a single identifier; and (iv) Rows in the output of an aggregate are identified by each row's group-by attribute values.
+
+The remaining challenge is assigning row identifiers to source data, which we want to remain stable through changes to the source data so that spreadsheet operations can be replayed.
+Ideally, the data would include a unique identifier that we can leverage; but this is not always the case.
+Storing the data in a revision control system~\cite{DBLP:conf/cidr/BhardwajBCDEMP15,DBLP:journals/pvldb/HuangXLEP17}, is not always a viable option~\cite{DBLP:conf/sigmod/AlagiannisBBIA12}.
+A more heavyweight approach is to link records across revisions of a dataset~\cite{DBLP:conf/sigmod/YilmazWXNEP18}, but this adds non-negligible overhead to common-case data revisions.
+Vizier presently supports persistent identifiers through append- or edit-only revisions by assigning each record a unique identifier based on its position, and a hash of its contents.
+This approach has the benefit of being lightweight (it can be applied in a single pass), and resilient.
+In contrast to simply using a hash-based identifier, the approach supports duplicate records.
+Conversely, solely using a position-based identifier could lead to spreadsheet operations being applied to the wrong row in case of insertions.
+%
+While techniques for creating identifiers that are stable under updates has been studied extensively for XML databases (e.g., ORDPATH~\cite{DBLP:conf/sigmod/ONeilOPCSW04}) and recently also for spreadsheet views of relational databases~\cite{DBLP:journals/pvldb/BendreSZZCP15}, the main challenge we face in Vizier is how to retain row identity when a new version of a dataset is loaded into Vizier, as opposed to keeping identity consistent once the data is already in the system.
+% In this scenario we only have access to two (identifier-free) snapshots of the dataset and no further information on how they relate to each other.
+
+%% Local Variables:
+%%% mode: latex
+%%% TeX-master: "../2022_IEEE_DEB_Vizier"
+%%% End:
