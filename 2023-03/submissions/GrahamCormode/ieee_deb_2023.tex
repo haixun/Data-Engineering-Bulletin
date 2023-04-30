@@ -1,0 +1,573 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{deauthor}
+\usepackage{times,graphicx}
+
+% user packages
+%\usepackage{todonotes}
+%\usepackage{pifont}
+%\newcommand{\cmark}{\ding{51}}
+%\newcommand{\xmark}{\ding{55}}
+\usepackage{multirow}
+\usepackage{booktabs}
+\usepackage{caption,subcaption}
+
+
+\usepackage{enumitem}
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+% \usepackage[preprint]{neurips_2022}
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+%     \usepackage[final]{neurips_2022}
+
+
+% to avoid loading the natbib package, add option nonatbib:
+% \usepackage[nonatbib]{neurips_2022}
+
+
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+%\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+%\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+%\usepackage{graphicx}
+%\usepackage{subfig}
+\usepackage{bm}
+\usepackage{amsmath,amssymb}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{soul}
+\usepackage{xspace}
+%\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{ulem}
+
+\DeclareMathOperator{\round}{round}
+\DeclareMathOperator{\clamp}{clamp}
+\newcommand{\citep}[1]{\cite{#1}}
+\newcommand{\citet}[1]{\cite{#1}}
+
+\newcommand{\R}{\mathbf R}
+\newcommand{\Z}{\mathbf Z}
+\newcommand{\cin}{C_{\text{in}}}
+\newcommand{\cout}{C_{\text{out}}}
+\newcommand{\wb}{\mathbf W}
+\newcommand{\xb}{\mathbf x}
+\newcommand{\yb}{\mathbf y}
+\newcommand{\calA}{\mathcal{A}}
+\newcommand{\bz}{\mathbf{z}}
+\newcommand{\bv}{\mathbf{v}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\ba}{\mathbf{a}}
+\newcommand{\calZ}{\mathcaL{Z}}
+\newcommand{\SecInd}{{\sc SecInd}\xspace}
+\newcommand{\SecAgg}{{\sc SecAgg}\xspace}
+\newcommand{\FedAvg}{{\sc FedAvg}\xspace}
+\newcommand{\SGD}{{\sc SGD}\xspace}
+
+\def\ie{\textit{i.e.,}\@\xspace}
+\def\eg{\textit{e.g.,}\@\xspace}
+
+\newcommand{\pierre}[1]{{\color{purple}Pierre: #1}}
+\newcommand{\sayan}[1]{{\color{red}Sayan: #1}}
+\newcommand{\karthik}[1]{{\color{blue}Karthik: #1}}
+\newcommand{\graham}[1]{{\color{green}Graham: #1}}
+\newcommand{\ilya}[1]{{\color{red}Ilya: #1}}
+\newcommand{\ashkan}[1]{{\color{blue}Ashkan: #1}}
+\newcommand{\dzmitry}[1]{{\color{purple}Dzmitry: #1}}
+\newcommand{\modif}[1]{{\color{black}#1}}
+
+\title{Reconciling Security and Communication Efficiency in Federated Learning}
+% Communication Efficient and Secure Federated Learning
+% Unifying Secure Federated Learning and Communication Efficiency
+% The Missing Bit for Practical Efficient Communication in Federated Learning
+% Enabling Federated Learning with Communication Efficiency
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+\author{
+Karthik Prasad\thanks{Equal contribution. Correspondence to \texttt{pstock@fb.com}.} $^{~\dagger}$~~ Sayan Ghosh\footnotemark[1]$^{~~\dagger}$~~ Graham Cormode$^\dagger$~~ \\ {Ilya Mironov$^\dagger$~~ Ashkan Yousefpour$^\dagger$~~ Pierre Stock$^\dagger$} \\ $^\dagger$Meta AI
+%   David S.~Hippocampus\thanks{Use footnote for providing further information
+%     about author (webpage, alternative address)---\emph{not} for acknowledging
+%     funding agencies.} \\
+%   Department of Computer Science\\
+%   Cranberry-Lemon University\\
+%   Pittsburgh, PA 15213 \\
+%   \texttt{hippo@cs.cranberry-lemon.edu} \\
+  % examples of more authors
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \AND
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+\begin{document}
+\maketitle 
+\begin{abstract}
+Cross-device Federated Learning is an increasingly popular machine learning setting to train a model by leveraging 
+a large population of client devices with high privacy and security guarantees. 
+However, 
+communication efficiency remains a major bottleneck when scaling federated learning to production environments, particularly due to bandwidth constraints during uplink communication.
+In this paper, we formalize and address the problem of compressing client-to-server model updates
+under the Secure Aggregation primitive, a core component of Federated Learning pipelines that allows the server to aggregate the client updates without accessing them individually. 
+In particular, we adapt standard scalar quantization and pruning methods
+to Secure Aggregation and propose Secure Indexing, a variant of Secure Aggregation that supports quantization for extreme compression.
+We establish state-of-the-art results on LEAF benchmarks in a secure Federated Learning setup with up to 40$\times$ compression in uplink communication 
+with no meaningful loss in utility compared to uncompressed baselines.
+% compared to a.
+% \karthik{\st{with less than one bit per weight on the LEAF benchmark and no significant loss in utility.}} 
+% \karthik{I have edited the abstract a bit, please check history to review my changes}
+\end{abstract}
+
+% this must go after the closing bracket ] following \twocolumn[ ...
+% This command actually creates the footnote in the first column
+% listing the affiliations and the copyright notice.
+% The command takes one argument, which is text to display at the start of the footnote.
+% The \mlsysEqualContribution command is standard text for equal contribution.
+% Remove it (just {}) if you do not need this facility.
+
+\input{introduction}
+
+\input{related}
+
+\input{background}
+
+\input{method}
+
+\input{experiments}
+
+\input{discussion}
+
+
+
+
+% and global and local differential privacy, 
+% and investigate strategies to select optimal compression parameters 
+% (quantization scales, centroids and pruning masks) 
+% for better performance in these scenarios.
+
+% % This 
+% % - Generic and less data-dependent codebook
+% % - Model compression 
+% % - Compression and DP
+% % - Error correction
+
+% % \section*{Acknowledgements}
+
+%\bibliography{bibliography}\bibliographystyle{abbrv}\end{document}
+
+\begin{thebibliography}{10}
+\setlength{\itemsep}{1pt}
+\begin{small}
+\bibitem{abadi2016deep}
+M.~Abadi, A.~Chu, I.~Goodfellow, H.~B. McMahan, I.~Mironov, K.~Talwar, and
+  L.~Zhang.
+\newblock Deep learning with differential privacy.
+\newblock In {\em ACM CCS}, 2016.
+
+\bibitem{aji2017sparse}
+A.~F. Aji and K.~Heafield.
+\newblock Sparse communication for distributed gradient descent.
+\newblock In {\em EMNLP}, 2017.
+
+\bibitem{alistarh2016qsgd}
+D.~Alistarh, D.~Grubic, J.~Li, R.~Tomioka, and M.~Vojnovic.
+\newblock {QSGD}: {C}ommunication-efficient {SGD} via gradient quantization and
+  encoding.
+\newblock In {\em NeurIPS}, 2017.
+
+\bibitem{amiri2020federated}
+M.~M. Amiri, D.~Gunduz, S.~R. Kulkarni, and H.~V. Poor.
+\newblock Federated learning with quantized global model updates.
+\newblock {\em CoRR}, 2006.10672, 2020.
+
+\bibitem{bell2020secure}
+J.~H. Bell, K.~A. Bonawitz, A.~Gasc{\'o}n, T.~Lepoint, and M.~Raykova.
+\newblock Secure single-server aggregation with (poly) logarithmic overhead.
+\newblock In {\em ACM CCS}, 2020.
+
+\bibitem{bernstein2018signsgd}
+J.~Bernstein, Y.-X. Wang, K.~Azizzadenesheli, and A.~Anandkumar.
+\newblock sign{SGD}: {C}ompressed optimisation for non-convex problems.
+\newblock In {\em ICML}, PMLR, 2018.
+
+\bibitem{Blalock20}
+D.~Blalock, J.~J. Gonzalez~Ortiz, J.~Frankle, and J.~Guttag.
+\newblock What is the state of neural network pruning?
+\newblock In {\em MLSys}, 2020.
+
+\bibitem{bonavitz2019federated}
+K.~A. Bonawitz, F.~Salehi, J.~Kone{\v{c}}n{\'y}, B.~McMahan, and M.~Gruteser.
+\newblock Federated learning with autotuned communication-efficient secure
+  aggregation.
+\newblock In {\em ACSCC}. {IEEE}, 2019.
+
+\bibitem{boyle16}
+E.~Boyle, N.~Gilboa, and Y.~Ishai.
+\newblock Function secret sharing: Improvements and extensions.
+\newblock In {\em ACM CCS}, 2016.
+
+\bibitem{caldas2018leaf}
+S.~Caldas, P.~Wu, T.~Li, J.~Kone{\v{c}}n{\'y}, H.~B. McMahan, V.~Smith, and
+  A.~Talwalkar.
+\newblock {LEAF:} {A} benchmark for federated settings.
+\newblock {\em CoRR}, abs/1812.01097, 2018.
+
+\bibitem{carlini2021membership}
+N.~Carlini, S.~Chien, M.~Nasr, S.~Song, A.~Terzis, and F.~Tram{\`{e}}r.
+\newblock Membership inference attacks from first principles.
+\newblock {\em CoRR}, abs/2112.03570, 2021.
+
+\bibitem{carlini2020extracting}
+N.~Carlini, F.~Tram{\`{e}}r, E.~Wallace, M.~Jagielski, A.~Herbert{-}Voss,
+  K.~Lee, A.~Roberts, T.~B. Brown, D.~Song, {\'{U}}.~Erlingsson, A.~Oprea, and
+  C.~Raffel.
+\newblock Extracting training data from large language models.
+\newblock In {\em {USENIX} Security Symposium}, 2021.
+
+\bibitem{charles2021largecohort}
+Z.~Charles, Z.~Garrett, Z.~Huo, S.~Shmulyian, and V.~Smith.
+\newblock On large-cohort training for federated learning.
+\newblock {\em CoRR}, 2106.07820, 2021.
+
+\bibitem{chen2017adacomp}
+C.~Chen, J.~Choi, D.~Brand, A.~Agrawal, W.~Zhang, and K.~Gopalakrishnan.
+\newblock {AdaComp}: Adaptive residual gradient compression for data-parallel
+  distributed training.
+\newblock In {\em AAAI}, 2018.
+
+\bibitem{chen2019federated}
+M.~Chen, R.~Mathews, T.~Ouyang, and F.~Beaufays.
+\newblock Federated learning of out-of-vocabulary words.
+\newblock {\em CoRR}, 1903.10635, 2019.
+
+\bibitem{courbariaux2015binaryconnect}
+M.~Courbariaux, Y.~Bengio, and J.-P. David.
+\newblock {BinaryConnect}: Training deep neural networks with binary weights
+  during propagations.
+\newblock {\em CoRR}, 1511.00363, 2015.
+
+\bibitem{dwork2006calibrating}
+C.~Dwork, F.~McSherry, K.~Nissim, and A.~Smith.
+\newblock Calibrating noise to sensitivity in private data analysis.
+\newblock In {\em Proceedings of the Third Conference on Theory of
+  Cryptography}, 2006.
+
+\bibitem{fcc-broadband}
+FCC.
+\newblock The eleventh {Measuring Broadband America} fixed broadband report,
+  2021.
+
+\bibitem{geiping2020inverting}
+J.~Geiping, H.~Bauermeister, H.~Dr\"{o}ge, and M.~Moeller.
+\newblock Inverting gradients---{H}ow easy is it to break privacy in federated
+  learning?
+\newblock In {\em NeurIPS}, 2020.
+
+\bibitem{Go_Bhayani_Huang_2009}
+A.~Go, R.~Bhayani, and L.~Huang.
+\newblock Twitter sentiment classification using distant supervision.
+\newblock CS224N Project Report, Stanford, 2009.
+
+\bibitem{gupta2015deep}
+S.~Gupta, A.~Agrawal, K.~Gopalakrishnan, and P.~Narayanan.
+\newblock Deep learning with limited numerical precision.
+\newblock In {\em ICML}, 2015.
+
+\bibitem{han2020adaptive}
+P.~Han, S.~Wang, and K.~K. Leung.
+\newblock Adaptive gradient sparsification for efficient federated learning: An
+  online learning approach.
+\newblock In {\em ICDCS}, 2020.
+
+\bibitem{hassabi1992second}
+B.~Hassibi and D.~G. Stork.
+\newblock Second order derivatives for network pruning: {O}ptimal {B}rain
+  {S}urgeon.
+\newblock In {\em NeurIPS}, 1992.
+
+\bibitem{he2020group}
+C.~He, M.~Annavaram, and S.~Avestimehr.
+\newblock Group knowledge transfer: Federated learning of large {CNN}s at the
+  edge.
+\newblock In {\em NeurIPS}, 2020.
+
+\bibitem{he2015deep}
+K.~He, X.~Zhang, S.~Ren, and J.~Sun.
+\newblock Deep residual learning for image recognition.
+\newblock In {\em {IEEE} CVPR}, 2016.
+
+\bibitem{hu2019dynamic}
+C.~Hu, W.~Bao, D.~Wang, and F.~Liu.
+\newblock Dynamic adaptive {DNN} surgery for inference acceleration on the
+  edge.
+\newblock {\em IEEE INFOCOM}, 2019.
+
+\bibitem{huba2021papaya}
+D.~Huba, J.~Nguyen, K.~Malik, R.~Zhu, M.~Rabbat, A.~Yousefpour, C.-J. Wu,
+  H.~Zhan, P.~Ustinov, H.~Srinivas, K.~Wang, A.~Shoumikhin, J.~Min, and
+  M.~Malek.
+\newblock Papaya: Practical, private, and scalable federated learning.
+\newblock In {\em MLSys}, 2022.
+
+\bibitem{jacob2017quantization}
+B.~Jacob, S.~Kligys, B.~Chen, M.~Zhu, M.~Tang, A.~Howard, H.~Adam, and
+  D.~Kalenichenko.
+\newblock Quantization and training of neural networks for efficient
+  integer-arithmetic-only inference.
+\newblock In {\em IEEE CVPR}, June 2018.
+
+\bibitem{jegou2011product}
+H.~J{\'{e}}gou, M.~Douze, and C.~Schmid.
+\newblock Product quantization for nearest neighbor search.
+\newblock {\em {IEEE} Trans. Pattern Anal. Mach. Intell.}, 33(1):117--128,
+  2011.
+
+\bibitem{jiang2019model}
+Y.~Jiang, S.~Wang, B.~J. Ko, W.~Lee, and L.~Tassiulas.
+\newblock Model pruning enables efficient federated learning on edge devices.
+\newblock {\em CoRR}, abs/1909.12326, 2019.
+
+\bibitem{kairouz2019advances}
+P.~{Kairouz et al.}
+\newblock Advances and open problems in federated learning.
+\newblock {\em Found. Trends Mach. Learn.}, 14(1–2), 2021.
+
+\bibitem{konen2016federated}
+J.~Konečný, H.~B. McMahan, F.~X. Yu, P.~Richtarik, A.~T. Suresh, and
+  D.~Bacon.
+\newblock Federated learning: Strategies for improving communication
+  efficiency.
+\newblock In {\em NIPS Workshop on Private Multi-Party Machine Learning}, 2016.
+
+\bibitem{krishnamoorthi2018quantizing}
+R.~Krishnamoorthi.
+\newblock Quantizing deep convolutional networks for efficient inference.
+\newblock {\em CoRR}, 1806.08342, 2018.
+
+\bibitem{lecun1990optimal}
+Y.~Le~Cun, J.~S. Denker, and S.~A. Solla.
+\newblock Optimal brain damage.
+\newblock In {\em NeurIPS}, 1989.
+
+\bibitem{lecun2010mnist}
+Y.~LeCun and C.~Cortes.
+\newblock {MNIST} handwritten digit database.
+\newblock http://yann.lecun.com/exdb/mnist/, 2010.
+
+\bibitem{lin2017deep}
+Y.~Lin, S.~Han, H.~Mao, Y.~Wang, and W.~Dally.
+\newblock Deep gradient compression: Reducing the communication bandwidth for
+  distributed training.
+\newblock In {\em ICLR}, 2018.
+
+\bibitem{liu2019double}
+X.~Liu, Y.~Li, J.~Tang, and M.~Yan.
+\newblock A double residual compression algorithm for efficient distributed
+  learning.
+\newblock In {\em AISTATS}, 2020.
+
+\bibitem{liu2015faceattributes}
+Z.~Liu, P.~Luo, X.~Wang, and X.~Tang.
+\newblock Deep learning face attributes in the wild.
+\newblock In {\em {IEEE} ICCV}, 2015.
+
+\bibitem{mcmahan2016communicationefficient}
+B.~McMahan, E.~Moore, D.~Ramage, S.~Hampson, and B.~A. y~Arcas.
+\newblock Communication-efficient learning of deep networks from decentralized
+  data.
+\newblock In {\em AISTATS}, 2017.
+
+\bibitem{MelisSCS19}
+L.~Melis, C.~Song, E.~D. Cristofaro, and V.~Shmatikov.
+\newblock Exploiting unintended feature leakage in collaborative learning.
+\newblock In {\em {IEEE} S\&P}, 2019.
+
+\bibitem{nguyen2021federated}
+J.~Nguyen, K.~Malik, H.~Zhan, A.~Yousefpour, M.~Rabbat, M.~Malek, and D.~Huba.
+\newblock Federated learning with buffered asynchronous aggregation.
+\newblock In {\em AISTATS}, 2022.
+
+\bibitem{parcollet2022zerofl}
+T.~Parcollet, J.~Fernandez-Marques, P.~PB~Gusmao, Y.~Gao, and N.~D. Lane.
+\newblock {ZeroFL}: Efficient on-device training for federated learning with
+  local sparsity.
+\newblock In {\em ICLR}, 2022.
+
+\bibitem{philippenko2021preserved}
+C.~Philippenko and A.~Dieuleveut.
+\newblock Preserved central model for faster bidirectional compression in
+  distributed settings.
+\newblock In {\em NeurIPS}, 2021.
+
+\bibitem{techreport}
+K.~Prasad, S.~Ghosh, G.~Cormode, I.~Mironov, A.~Yousefpour, and P.~Stock.
+\newblock Reconciling security and communication efficiency in federated
+  learning.
+\newblock {\em CoRR}, 2207.12779, 2022.
+
+\bibitem{qiu2021first}
+X.~Qiu, T.~Parcollet, J.~Fernandez-Marques, P.~P.~B. de~Gusmao, D.~J. Beutel,
+  T.~Topal, A.~Mathur, and N.~D. Lane.
+\newblock A first look into the carbon footprint of federated learning.
+\newblock {\em arXiv}, 2102.07627, 2021.
+
+\bibitem{renggli2018sparcml}
+C.~Renggli, S.~Ashkboos, M.~Aghagolzadeh, D.~Alistarh, and T.~Hoefler.
+\newblock {SparCML}: High-performance sparse communication for machine
+  learning.
+\newblock In {\em SC}, 2019.
+
+\bibitem{rothchild2020fetchsgd}
+D.~Rothchild, A.~Panda, E.~Ullah, N.~Ivkin, I.~Stoica, V.~Braverman,
+  J.~Gonzalez, and R.~Arora.
+\newblock {F}etch{SGD}: Communication-efficient federated learning with
+  sketching.
+\newblock In {\em ICML}, 2020.
+
+\bibitem{sattler2019robust}
+F.~Sattler, S.~Wiedemann, K.-R. M{\"u}ller, and W.~Samek.
+\newblock Robust and communication-efficient federated learning from
+  non-{i.i.d.} data.
+\newblock {\em IEEE Transactions on Neural Networks and Learning Systems},
+  31:3400--3413, 2020.
+
+\bibitem{seide2014bit}
+F.~Seide, H.~Fu, J.~Droppo, G.~Li, and D.~Yu.
+\newblock 1-bit stochastic gradient descent and its application to
+  data-parallel distributed training of speech {DNNs}.
+\newblock In {\em {INTERSPEECH}}, 2014.
+
+\bibitem{stock2019bit}
+P.~Stock, A.~Joulin, R.~Gribonval, B.~Graham, and H.~Jégou.
+\newblock And the bit goes down: Revisiting the quantization of neural
+  networks.
+\newblock In {\em ICLR}, 2020.
+
+\bibitem{tang2019doublesqueeze}
+H.~Tang, C.~Yu, X.~Lian, T.~Zhang, and J.~Liu.
+\newblock \textsc{DoubleSqueeze}: Parallel stochastic gradient descent with
+  double-pass error-compensated compression.
+\newblock In {\em ICML}, 2019.
+
+\bibitem{vepakomma2018split}
+P.~Vepakomma, O.~Gupta, T.~Swedish, and R.~Raskar.
+\newblock Split learning for health: Distributed deep learning without sharing
+  raw patient data, 2018.
+
+\bibitem{vogels2019powersgd}
+T.~Vogels, S.~P. Karimireddy, and M.~Jaggi.
+\newblock {PowerSGD}: Practical low-rank gradient compression for distributed
+  optimization.
+\newblock In {\em NeurIPS}, 2019.
+
+\bibitem{wang2018atomo}
+H.~Wang, S.~Sievert, S.~Liu, Z.~Charles, D.~Papailiopoulos, and S.~Wright.
+\newblock {ATOMO}: Communication-efficient learning via atomic sparsification.
+\newblock In {\em NeurIPS}, 2018.
+
+\bibitem{wang2022fedlite}
+J.~Wang, H.~Qi, A.~S. Rawat, S.~Reddi, S.~Waghmare, F.~X. Yu, and G.~Joshi.
+\newblock Fedlite: A scalable approach for federated learning on
+  resource-constrained clients.
+\newblock {\em CoRR}, 2201.11865, 2022.
+
+\bibitem{wangni2017gradient}
+J.~Wangni, J.~Wang, J.~Liu, and T.~Zhang.
+\newblock Gradient sparsification for communication-efficient distributed
+  optimization.
+\newblock In {\em NeurIPS}, 2018.
+
+\bibitem{wen2017terngrad}
+W.~Wen, C.~Xu, F.~Yan, C.~Wu, Y.~Wang, Y.~Chen, and H.~Li.
+\newblock {TernGrad}: Ternary gradients to reduce communication in distributed
+  deep learning.
+\newblock In {\em NeurIPS}, 2017.
+
+\bibitem{LightSecAgg}
+C.~Yang, J.~So, C.~He, S.~Li, Q.~Yu, and S.~Avestimehr.
+\newblock {LightSecAgg}: Rethinking secure aggregation in federated learning.
+\newblock In {\em MLSys}, 2022.
+
+\bibitem{yu2018gradiveq}
+M.~Yu, Z.~Lin, K.~Narra, S.~Li, Y.~Li, N.~S. Kim, A.~Schwing, M.~Annavaram, and
+  S.~Avestimehr.
+\newblock {GradiVeQ}: Vector quantization for bandwidth-efficient gradient
+  aggregation in distributed {CNN} training.
+\newblock In {\em NeurIPS}, 2018.
+
+\bibitem{zheng2019communicationefficient}
+S.~Zheng, Z.~Huang, and J.~T. Kwok.
+\newblock Communication-efficient distributed blockwise momentum {SGD} with
+  error-feedback.
+\newblock In {\em NeurIPS}, 2019.
+
+\bibitem{zhou2016dorefanet}
+S.~Zhou, Z.~Ni, X.~Zhou, H.~Wen, Y.~Wu, and Y.~Zou.
+\newblock {DoReFa-Net}: Training low bitwidth convolutional neural networks
+  with low bitwidth gradients.
+\newblock {\em CoRR}, abs/1606.06160, 2016.
+\end{small}
+\end{thebibliography}
+% \pagebreak
+%\graham{\sout{Checklist}}
+%\input{checklist}}
+
+
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% % SUPPLEMENTAL CONTENT AS APPENDIX AFTER REFERENCES
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%\appendix
+%\input{appendix}
+% %
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\end{document}
+
+
+% This document was modified from the file originally made available by
+% Pat Langley and Andrea Danyluk for ICML-2K. This version was created
+% by Iain Murray in 2018. It was modified from a version from Dan Roy in
+% 2017, which was based on a version from Lise Getoor and Tobias
+% Scheffer, which was slightly modified from the 2010 version by
+% Thorsten Joachims & Johannes Fuernkranz, slightly modified from the
+% 2009 version by Kiri Wagstaff and Sam Roweis's 2008 version, which is
+% slightly modified from Prasad Tadepalli's 2007 version which is a
+% lightly changed version of the previous year's version by Andrew
+% Moore, which was in turn edited from those of Kristian Kersting and
+% Codrina Lauth. Alex Smola contributed to the algorithmic style files.
