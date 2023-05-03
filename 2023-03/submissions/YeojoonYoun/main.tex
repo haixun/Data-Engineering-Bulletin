@@ -35,8 +35,8 @@
 %\usepackage{placeins}
 %\usepackage{tabularx}
 %\usepackage{makecell}
- 
- 
+
+
  %\newtheorem{remark}{Remark}
 
 % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -69,281 +69,1806 @@ $^{\dagger}$ Georgia Institute of Technology \hspace{1em}
 
 \maketitle
 
-\input{submissions/YeojoonYoun/abstract}
+\begin{abstract}
+  Federated optimization is a new form of distributed training on very large datasets that leverages many devices each containing local data. While decentralized computation can lead to significant speed-ups due to parallelization, some centralization is still required: devices must aggregate their parameter updates through synchronization across the network. The potential for communication bottleneck is significant. The two main methods to tackle this issue are (a) smarter optimization that decreases the frequency of communication rounds and (b) using \emph{compression} techniques such as quantization and sparsification to reduce the number of bits machines need to transmit. In this paper, we provide a novel algorithm,  \textbf{Fed}erated optimization algorithm with \textbf{A}cceleration and \textbf{Q}uantization (FedAQ), with improved theoretical guarantees by combining an accelerated method of federated averaging, reducing the number of training and synchronization steps, with an efficient quantization scheme that significantly reduces communication complexity. We show that in a homogeneous strongly convex setting, FedAQ achieves a linear speedup in the number of workers $M$ with only $\Tilde{\mathcal{O}}(M^{\frac{1}{3}})$ communication rounds, significantly smaller than what is required by other quantization-based federated optimization algorithms. Moreover, we empirically verify that our algorithm performs better than current methods.
+\end{abstract}
 
-\input{submissions/YeojoonYoun/introduction}
+\section{Introduction}
 
-\input{submissions/YeojoonYoun/related_works}
+Federated learning (FL) has attracted much attention from both academia and industry due to the increasing demand for large-scale distributed machine learning systems and preserving privacy-sensitive data on local devices such as smartphones and IoT devices. In federated learning, a number of clients collaboratively learn the global objective function by communicating with a central server without sharing any locally stored data in each local device. The research in Federated learning has identified four major challenges: communication efficiency, systems heterogeneity, statistical heterogeneity, and privacy \cite{Yeojoon-li2020federated}. In this paper, we focus on communication efficiency that is of primary interest in cross-device settings when there is a heavy communication burden with many edge computing devices and limited network bandwidth. Two of the most widely used methods to reduce the communication cost are federated averaging optimization and randomized compression techniques.
 
-\input{submissions/YeojoonYoun/problem_setup}
+\begin{table*}[!htbp]
+\caption{Summary of Results on the Convergence Rate and Communication Required for Linear Speedup. $M$ is the number of devices, $T$ is the number of total parallel iterations, and $K$ is the number of communication rounds, $q$ is a quantization parameter (Assumption \ref{assumption1}), $d_{\text{quant}}$ is the number of bits used to quantize, $d_{\text{full}}$ is the number of bits required when there is no quantization ($d_{\text{full}} \gg d_{\text{quant}}$). \cite{Yeojoon-yuan2020federated} and FedAQ send two iterates per communication round as other algorithms to achieve acceleration (See line 11 in Algorithm \ref{algorithm1}), we multiply $d_{\text{full}}$ and $d_{\text{quant}}$ by 2 for bits communicated for a linear speedup. The presented results of \cite{Yeojoon-haddadpour2021federated} are newly obtained (\cref{app:fedcomgate}).}
+\label{table:comparison}
+\centering\footnotesize
+% Vertical size of the table
+\renewcommand\arraystretch{1} %1
+% Set tab size
+\renewcommand{\tabcolsep}{12pt}
+\begin{tabularx}{\textwidth}{p{0.22\linewidth}p{0.16\linewidth}rr}
+\toprule
+\thead[l]{Algorithm}
+& \thead[l]{Convergence rate}
+& \thead[r]{Communication rounds for $\Tilde{\mathcal{O}}(\frac{1}{T})$\\ convergence with linear speedup}
+& \thead[r]{Bits communicated for \\linear speedup} \\
+\midrule
+FedPAQ \cite{Yeojoon-reisizadeh2020fedpaq}
+& $\mathcal{O}(\frac{1+q}{K} + \frac{T}{K^2})$
+& Not possible
+& Not possible \\
+%\midrule
+FedCOMGATE \cite{Yeojoon-haddadpour2021federated}
+& $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1}{TK})$
+& $\Tilde{\mathcal{O}}(\frac{M}{1+q})$ & $\Tilde{\mathcal{O}}(\frac{M}{1+q}) \cdot d_{\text{quant}}$\\
+%\midrule
 
-\input{submissions/YeojoonYoun/FedAQ}
+FedAC \cite{Yeojoon-yuan2020federated}
+& $\Tilde{\mathcal{O}}(\frac{1}{MT}+\frac{1}{TK^3})$ & $\Tilde{\mathcal{O}}(M^{\frac{1}{3}})$  & $\Tilde{\mathcal{O}}(M^{\frac{1}{3}})\cdot 2d_{\text{full}}$\\
+%\midrule
 
-\input{submissions/YeojoonYoun/convergence_analysis}
+\midrule
+\textbf{FedAQ} (Corollary \ref{corollary2}) & $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1+q}{TK^3})$ & $\Tilde{\mathcal{O}}(M^{\frac{1}{3}})$ & $\Tilde{\mathcal{O}}(M^{\frac{1}{3}})\cdot 2d_{\text{quant}}$ \\
+\bottomrule
+\end{tabularx}
+\end{table*}
 
-\input{submissions/YeojoonYoun/experiment}
+In federated averaging (FedAvg) \cite{Yeojoon-mcmahan2017communication}, also called \textit{local SGD}, each client locally updates its model with multiple stochastic gradient descent (SGD) steps, and a server aggregates model updates of clients. The server updates its own model parameters by averaging client models and then broadcasts the server parameters to all clients. This enables FL systems to achieve high communication efficiency with infrequent synchronization while showing better performance than distributed large mini-batch SGD \cite{Yeojoon-lin2018don}. Due to the significant empirical success of FedAvg, researchers have proposed an interesting theoretical question: To what extent can we minimize the number of synchronizations in order to both guarantee convergence and achieve linear speedup in the number of workers $M$\footnote{Linear speedup in the number of workers is a desirable property in parallel computing which implies that the task takes half as much time if the number of workers are doubled.}? For the strongly-convex and homogeneous settings, \cite{Yeojoon-khaled2020tighter} was able to achieve a linear speedup in $M$ with $\Tilde{\mathcal{O}}(M)$ communication rounds, which is the state-of-the-art result for FedAvg convergence analysis. However, even with this progress on theoretical guarantees of FedAvg, it remains unclear whether further improvements on convergence time and communication efficiency can be achieved.
 
-\input{submissions/YeojoonYoun/conclusion}
+Applying acceleration methods to FL has led to improved convergence, with \cite{Yeojoon-yuan2020federated} providing a faster version of FedAvg with provably stronger bounds. For the strongly-convex and homogeneous setting, their algorithm achieves a linear speedup in $M$ with only $\Tilde{\mathcal{O}}(M^{\frac{1}{3}})$ communication rounds. Hence, the accelerated version of federated averaging requires a much smaller number of communication rounds than FedAvg to achieve the same accuracy. At present, this remains the best result for strongly-convex and homogeneous local data distribution settings.
+In addition to reducing the required number of communication rounds, another powerful way to build communication-efficient FL systems is to reduce the number of bits that need to be transmitted at each synchronization. \cite{Yeojoon-reisizadeh2020fedpaq, Yeojoon-haddadpour2021federated} have shown that such compression techniques, which include \textit{quantization}, reduce communication costs and guarantee convergence (See Table \ref{table:comparison}).
 
+In this work, we provide a novel algorithm, \textbf{Fed}erated optimization algorithm with \textbf{A}cceleration and \textbf{Q}uantization (FedAQ), to solve the severe communication bottleneck problem in FL systems. FedAQ is the first federated optimization algorithm that successfully incorporates \emph{multiple local update schemes}, \emph{acceleration}, and \emph{quantization} for master-worker topology. Although these three key desiderata of Federal Learning systems have individually been shown to build communication-efficient FL systems, it is not obvious if or how acceleration techniques can lead to faster convergence even for quantization-based methods. We answer this question by showing that FedAQ converges for strongly-convex and homogeneous local data distribution settings without any additional strong assumptions.
+
+ Let $T$ be the number of total parallel iterations, $K$ be the number of total communication rounds. We compare our results to previous methods in Table \ref{table:comparison}, and highlight the following contributions:
+ \begin{enumerate}
+
+     \item FedAQ has a convergence rate of $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1+q}{TK^3})$ which is better than the $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1}{TK})$ convergence of \cite{Yeojoon-haddadpour2021federated}, the state of the art in quantization based methods. Here $q$ is a parameter that measures the effectiveness of the quantization scheme (see Assumption \ref{assumption1}). This allows FedAQ to obtain linear speedup with only $\Tilde{\mathcal{O}}(M^{\frac{1}{3}})$ communication rounds whereas \cite{Yeojoon-haddadpour2021federated} requires $\Tilde{\mathcal{O}}(\frac{M}{1+q})$ rounds. The faster convergence in number of communication rounds also implies that FedAQ can achieve better convergence than \cite{Yeojoon-haddadpour2021federated} by using many fewer communication rounds. Thus, although FedAQ sends two iterates in each communication round, that is the bits communicated in each round are twice many compared to \cite{Yeojoon-haddadpour2021federated} for the same level of quantization, FedAQ requires much smaller total communication costs due to the large reduction in synchronization rounds.
+
+     %a much smaller number of synchronization rounds which leads to smaller total communication costs.
+     %synchronization needs twice as much per-round communication costs as \cite{Yeojoon-haddadpour2021federated}, FedAQ requires much less communication overall due to the large reduction $\Tilde{\mathcal{O}}(\frac{1+q}{M^{\frac{2}{3}}})$ in synchronization rounds. % That is, FedAQ requires much less communication overall because the difference between the per-round communication costs of FedAQ and \cite{Yeojoon-haddadpour2021federated} is negligible compared to the large reduction in synchronization rounds of FedAQ.
+
+    \item \label{contribution2} When comparing FedAQ to Accelerated Federated learning, we observe that FedAQ has similar convergence and requires the same number of communication rounds as \cite{Yeojoon-yuan2020federated}. In each communication round of \cite{Yeojoon-yuan2020federated}, every client sends the complete iterates to the server without any quantization. To effectively obtain a convergence rate of $\Tilde{\mathcal{O}}(\frac{1}{MT})$, it needs to send each value with a precision of $\Tilde{\mathcal{O}}(\frac{1}{MT})$, requiring $d_{\text{full}} = {\mathcal{O}}(\log{(MT)})$ bits. In comparison, if we use the low precision quantizer (See \cref{problem_setup} Example 1) given by \cite{Yeojoon-alistarh2017qsgd}, FedAQ needs to send only $d_{\text{quant}} = O(\log \frac{1}{q})$ bits \footnote{More details on this are discussed in \cref{app:quantization_noise}} for each value. Since $q$ is a constant, $d_{\text{quant}} \ll d_{\text{full}}$. The extra $1+q$ term in the convergence for FedAQ can be offset by scaling the number of local updates by $1+q$, which is cheaper than expensive data communication. Thus, FedAQ obtains the same convergence as \cite{Yeojoon-yuan2020federated} using as many communication rounds but by sending many fewer bits per round.
+
+
+ \end{enumerate}
+
+ Finally, we empirically verify that our algorithm exhibits better performance than baselines, FedPAQ \cite{Yeojoon-reisizadeh2020fedpaq}, FedCOMGATE \cite{Yeojoon-haddadpour2021federated}, FedAC \cite{Yeojoon-yuan2020federated}, and FedAvg \cite{Yeojoon-mcmahan2017communication} on classical vision datasets such as MNIST~\cite{Yeojoon-lecun1998mnist} and CIFAR-10~\cite{Yeojoon-krizhevsky2009learning}.
+
+
+\section{Related Works}
+
+The first guarantee for FedAvg, showing that it converges at the same rate as mini-batch SGD in strongly convex scenarios, was shown by \cite{Yeojoon-stich2018local} in the IID setting. The further convergence analysis of FedAvg for non-convex functions was laid out in a number of published works \cite{Yeojoon-wang2018cooperative, Yeojoon-haddadpour2019trading, Yeojoon-yu2019parallel}. Followup work has managed to remove unnecessary assumptions, such as uniformly bounded gradients, to achieve better convergence rates \cite{Yeojoon-wang2018cooperative, Yeojoon-stich2019error, Yeojoon-haddadpour2019local, Yeojoon-khaled2020tighter, Yeojoon-woodworth2020local}. Moreover, \cite{Yeojoon-li2018federated, Yeojoon-haddadpour2019convergence, Yeojoon-li2019convergence, Yeojoon-khaled2020tighter, Yeojoon-karimireddy2020scaffold} define scenarios that depart from the IID framework, analyzing the convergence of FedAvg and its variants in settings with heterogeneous data distributions.
+
+Reducing the transmitted bits between a server and clients through compression techniques is pivotal to saving communication costs in federated learning. This motivates researchers to develop various compression techniques such as sparsification and quantization without significantly sacrificing accuracy \cite{Yeojoon-konevcny2016federated, Yeojoon-alistarh2017qsgd, Yeojoon-suresh2017distributed, Yeojoon-wangni2017gradient, Yeojoon-bernstein2018signsgd, Yeojoon-wang2018atomo, Yeojoon-vogels2019powersgd, Yeojoon-horvath2019natural, Yeojoon-basu2019qsparse, Yeojoon-rothchild2020fetchsgd}. \cite{Yeojoon-reisizadeh2020fedpaq} shows near-optimal theoretical guarantees of the first federated optimization algorithm that incorporates federated averaging, partial node participation, and quantization in homogeneous local data distribution settings. \cite{Yeojoon-haddadpour2021federated} further provide improved convergence rates for both homogeneous and heterogeneous settings.
+
+We can achieve better communication efficiency by applying acceleration methods into client updates. \cite{Yeojoon-yuan2020federated} has proposed the first provable acceleration of FedAvg that achieves a linear speedup with the fewest communication rounds. Several other works aim to achieve communication efficiency by using momentum or adaptive optimizers \cite{Yeojoon-yu2019linear, Yeojoon-karimireddy2020mime, Yeojoon-wang2021local}. It is important to note that our work is not the first to combine acceleration and quantization.  \cite{Yeojoon-li2020acceleration, Yeojoon-li2021canita}, for example, propose compressed and accelerated distributed optimization methods that are neither stochastic nor FedAvg variants. \cite{Yeojoon-singh2021squarm} proposes communication efficient momentum SGD for decentralized optimization. \cite{Yeojoon-li2022distributed, Yeojoon-wang2022communication} show that distributed and federated versions of adaptive optimizers along with gradient compression can lead to similar convergence rates as their non-compressed counterparts. But these works do not achieve the core result of the present paper, which is the reduced communication complexity via a faster convergence rate and a linear speedup with the small number of communication rounds. To the best of our knowledge, FedAQ is the first accelerated version of federated averaging for master-worker topology that successfully integrates a quantization scheme and provides rigorous convergence guarantees.
+
+\section{Problem Setup} \label{problem_setup}
+
+In this paper, we build our algorithm based on federated learning with captain-worker topology where $M$ local devices contain their own local data, and a server aggregates local parameter updates without sharing any data during synchronization rounds. Since we focus on \emph{homogeneous} local data distribution settings for the convergence analysis of our algorithm, we define the distributed stochastic optimization problem as below.
+\begin{align*}
+    \min_{w \in \mathbb{R}^d} F(w) := \mathbb{E}_{z\sim\mathcal{D}}[f(w;z)]
+\end{align*}
+In our convergence analysis, we assume $F$ is \emph{strongly-convex}. Each client can access $F$ at $w$ via oracle $\nabla f(w;z)$ because all clients have the same loss function $f$. Also, every local device has the same local data distribution $\mathcal{D}$. Moreover, we use the \emph{full participation} of nodes for local updates and synchronizations.
+
+\subsection{Assumptions}
+
+Let us clarify assumptions on the unbiased quantizer $Q$, the global objective function $F$, and the unbiased gradient estimator $\nabla f$.
+
+\begin{assumption} \label{assumption1}
+The variance of the unbiased quantizer $Q$ is bounded by the squared of $l_2$-norm of its argument, i.e., $\mathbb{E}[Q(x)|x]=x, \textrm{ } \mathbb{E}[\|Q(x) - x\|^2 |x] \leq q \|x\|^2$.
+\end{assumption}
+For example, a well-known randomized quantizer which satisfies Assumption \ref{assumption1} is low-precision quantizer in \cite{Yeojoon-alistarh2017qsgd}.
+
+\textbf{Example 1.} (Low-precision quantizer) Given $x \in \mathbb{R}^d$, the quantizer $Q:\mathbb{R}^d \rightarrow \mathbb{R}^d$ is defined by
+\begin{align*}
+    Q_i(x) = \textrm{sign}(x_i)\cdot\|x\|\cdot \xi_i(x, s),   \textrm{ } \textrm{ } i \in [d]
+\end{align*}
+$\xi_i$ is defined as below.
+$$\xi_i(x, s)=
+\begin{cases}
+\frac{l+1}{s},~\textrm{with probability } \frac{|x_i|}{\|x\|}s - l\\
+\frac{l}{s},~\textrm{ } \textrm{ } \textrm{ o/w}
+\end{cases}$$
+$s$ is the number of quantization levels. $l \in [0, s)$ is an integer which satisfies $\frac{|x_i|}{\|x\|} \in [\frac{l}{s}, \frac{l+1}{s})$.
+
+\begin{assumption} \label{assumption2}
+F is $\mu$-strongly convex, i.e., $F(w_1) \geq F(w_2) + \langle \nabla F(w_2), w_1-w_2 \rangle + \frac{1}{2}\mu \|w_1-w_2\|^2$ for any $w_1, w_2 \in \mathbb{R}^d$.
+\end{assumption}
+
+\begin{assumption} \label{assumption3}
+F is L-smooth, i.e., $F(w_1) \leq F(w_2) + \langle \nabla F(w_2), w_1-w_2 \rangle + \frac{1}{2}L \|w_1-w_2\|^2$ for any $w_1, w_2 \in \mathbb{R}^d$.
+\end{assumption}
+
+\begin{assumption} \label{assumption4}
+$\nabla f(w; \xi)$ is unbiased and variance bounded, i.e., $\mathbb{E}_\xi[\nabla f(w; \xi)] = \nabla F(w)$, $\mathbb{E}_\xi[\|\nabla f(w; \xi) - \nabla F(w)\|^2] \leq \sigma^2$ for any $w \in \mathbb{R}^d$.
+\end{assumption}
+
+
+\subsection{Notation}
+
+We use $\tau, K$ to respectively denote the number of local updates and total communication rounds, which means the total number of iterations $T$ at each node satisfies $T = K\tau$. Since we consider a strongly-convex case, we can find the optimal point $w^*$ and denote the optimal function value as $F^* := F(w^*)$. The local parameter $w_{k, t}^m$ indicates the parameter of the $m$-th local model after $k$th synchronization followed by $t$ local SGD updates. There are other types of parameters such as $w_{k, t}^{\textrm{ag}, m} \textrm{ and } w_{k, t}^{\textrm{md}, m}$, and we obtain two types of parameters $w_k$ and $w_k^{\textrm{ag}}$ in the server side after $k$th synchronization. More details on these parameters will be discussed in the next section.
+
+
+\section{FedAQ Algorithm}
+
+We propose a novel communication efficient algorithm that combines an accelerated variant of federated averaging and an efficient quantization scheme. Our FedAQ algorithm has two main parts: (1) multiple accelerated local updates and (2) communication with quantization. Both components contribute to achieving better communication efficiency than other previous federated algorithms. The entire process is summarized in Algorithm \ref{algorithm1}. %(See Appx.~\ref{app:fedaq_alg}).
+
+\subsection{Multiple Accelerated Local Updates}
+
+The FedAvg algorithm, proposed by \cite{Yeojoon-mcmahan2017communication}, is widely used for federated learning to improve communication efficiency by reducing communication rounds with multiple local SGD updates. \cite{Yeojoon-yuan2020federated} provide FedAC that replaces the stochastic gradient updates of FedAvg by accelerated version of SGD by \cite{Yeojoon-ghadimi2012optimal} resulting in a linear speedup in $M$ with fewer communication rounds than FedAvg.
+
+Thus, we apply the FedAC scheme to multiple updates of each local model. Since previous quantization-based federated optimization algorithms are FedAvg variants with no acceleration, the accelerated method enables our algorithm to gain better communication efficiency than others.
+
+As you can see in Algorithm \ref{algorithm1}, we need two more local parameters $w_{k, t}^{\textrm{ag}, m}$ and $w_{k, t}^{\textrm{md}, m}$ for acceleration in addition to the main local parameter $w_{k, t}^m$. $w_{k,t}^{\textrm{ag},m}$ aggregates the past iterates, and the gradients are queried at the auxiliary parameter $w_{k,t}^{\textrm{md},m}$. While typical FL algorithms without acceleration only have a learning rate $\eta$ as their hyperparameter, the general acceleration scheme makes our algorithm flexible due to four hyperparameters $\alpha, \beta, \eta, \gamma$. $\alpha, \beta$ are hyperparameters related to coupling coefficients, and $\eta, \gamma$ stand for learning rates respectively for $w_{k, t}^{\textrm{ag}, m}, w_{k, t}^m$. The flexibility of hyperparameters enables the fast convergence speed of FedAQ, but naively chosen hyperparameters also cause unstable training of FedAQ. We discuss the exact choice of hyperparameters in \cref{convergence_analysis}. Unlike FedAC, that requires each client to communicate the exact iterates to the server with high precision, we discuss in the following subsection how FedAQ incorporates quantization techniques to reduce communication cost.
+
+
+%Thus, we carefully determine two parameter condition sets that theoretically ensure the convergence guarantees. The first one is
+% \begin{align} \label{parameter_FedAQ}
+%     \eta, \gamma \in \Big( 0, \frac{1}{L} \Big], \gamma = \max \Big( \sqrt{\frac{\eta}{\mu\tau}}, \eta \Big), \alpha = \frac{1}{\gamma\mu}, \beta = \alpha + 1
+% \end{align}
+% We add one more condition $\gamma \in (0, \frac{1}{L}]$ to the FedAC-I condition \cite{Yeojoon-yuan2020federated} and create our parameter condition set (\ref{parameter_FedAQ}). The second one is
+% \begin{align} \label{parameter2_FedAQ}
+%     \eta, \gamma \in \Big( 0, \frac{1}{L} \Big], \gamma = \max \Big( \sqrt{\frac{\eta}{\mu\tau}}, \eta \Big), \alpha=\frac{3}{2\gamma\mu} - \frac{1}{2}, \beta = \frac{2\alpha^2-1}{\alpha-1}, \gamma\mu \leq \frac{3}{4}
+% \end{align}
+% We add two more conditions $\gamma \in (0, \frac{1}{L}]$ and $\gamma\mu \leq \frac{3}{4}$ to the FedAC-II condition to build our parameter condition set (\ref{parameter2_FedAQ}). Even though quantization adds complexity to the algorithm, these weak assumptions are the only additional requirements for showing the convergence of FedAQ. More details on how the above conditions help the convergence proof of FedAQ are shown in Appx.~\ref{app:proof_lemma} and Appx.~\ref{app:proof_lemma2}.
+
+\subsection{Communication with Quantization}
+
+In cross-device federated learning, a large amount of communicated messages from a number of devices and the limited communication bandwidth can lead to severe communication bottlenecks. Therefore, in this scenario, an efficient quantization scheme can significantly reduce the size of communicated messages and make communication between local devices and a server faster. We apply the same unbiased quantizer used in \cite{Yeojoon-haddadpour2021federated} that satisfies Assumption \ref{assumption1}.
+
+In contrast with other quantization-based federated optimization algorithms \cite{Yeojoon-reisizadeh2020fedpaq, Yeojoon-haddadpour2021federated}, the algorithmic novelty of FedAQ is based on applying quantization to two model parameter updates, which is required in order to simultaneously reduce the frequency of communication and the volume of communicated bits. To the best of our knowledge, this is the first quantization-based method that achieves the accelerated rate with the dramatic reduction in communication cost.
+% federated optimization  where quantization is used for two model updates during a synchronization step with theoretical guarantees of how acceleration reduces the number of communication rounds to achieve a linear speedup for quantization-based methods.
+To be specific on the communication process, after each client $m$ obtains $w_{k, \tau}^m, w_{k, \tau}^{\textrm{ag}, m}$ through $\tau$ accelerated local iterations, each client quantizes the difference between $w_{k, \tau}^m, w_{k, \tau}^{\textrm{ag}, m}$ and the most recent server models $w_k, w_k^{\textrm{ag}}$. Then, a server aggregates $Q(w_{k, \tau}^m - w_k), Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})$ from all clients. After dequantizing those messages, the server obtains the following new models $w_{k+1}, w_{k+1}^{\textrm{ag}}$ and broadcasts them back to each client.
+% \begin{align*}
+%     w_{k+1} &= w_k + \frac{1}{M}\sum_{m=1}^M Q(w_{k, \tau}^m - w_k)\\
+%     w_{k+1}^{\textrm{ag}} &= w_k^{\textrm{ag}} + \frac{1}{M} \sum_{m=1}^M Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})
+% \end{align*}
+
+\begin{algorithm} %[H]
+\caption{Federated Accelerated SGD with Quantization (FedAQ)}\label{algorithm1}
+\begin{algorithmic}[1]
+\State{\bfseries Input:} $\alpha, \beta, \eta, \gamma$, initial vector $w_0 = w_{0, 0}^{\textrm{ag}, m} = w_{0, 0}^m$ for all devices $m \in [M]$
+\For{$k = 0, \cdots, K-1$}
+\For{each client $m$ in parallel}
+\State $w_{k, 0}^m \leftarrow w_k, w_{k, 0}^{\textrm{ag}, m} \leftarrow w_k^{\textrm{ag}}$
+\For{$t = 0, \cdots, \tau-1$}
+\State $w_{k, t}^{\textrm{md}, m} \leftarrow \beta^{-1}w_{k, t}^m + (1-\beta^{-1})w_{k, t}^{\textrm{ag}, m}$
+\State $g_{k, t}^m \leftarrow \nabla f(w_{k, t}^{\textrm{md}, m}, \xi_{k, t}^m)$
+\State $w_{k, t+1}^{\textrm{ag}, m} \leftarrow w_{k, t}^{\textrm{md}, m} - \eta g_{k, t}^m $
+\State $w_{k, t+1}^m \leftarrow (1-\alpha^{-1})w_{k, t}^m + \alpha^{-1} w_{k, t}^{\textrm{md}, m} - \gamma g_{k, t}^m$
+\EndFor
+\State send $Q(w_{k, \tau}^m - w_k), Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})$
+\EndFor
+\State server finds $w_{k+1} \leftarrow w_k + \frac{1}{M}\sum\limits_{m=1}^M Q(w_{k, \tau}^m - w_k), \textrm{ } w_{k+1}^{\textrm{ag}} \leftarrow w_k^{\textrm{ag}} + \frac{1}{M} \sum\limits_{m=1}^M Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})$
+\EndFor
+
+\end{algorithmic}
+\end{algorithm}
+
+\section{Convergence Analysis}
+\label{convergence_analysis}
+
+The rigorous theoretical guarantees of reducing communication complexity under strongly-convex and homogeneous assumptions should come first to ensure the significance of FedAQ as one of the standards of communication-efficient federated optimization algorithms. Proving convergence guarantees of FedAQ even under these assumptions requires careful consideration of the approximation error induced by the quantization scheme combined with the convergence analysis of acceleration based methods.
+To recall, in FedAQ the server aggregates two quantized local updates $Q(w_{k, \tau}^m - w_k), Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})$ from all clients (See line 11 in Algorithm \ref{algorithm1}) in each round. If we simply try to generalize the convergence guarantee of FedAC to incorporate the quantization variance costs, the proof techniques from earlier quantization-based methods cannot be directly applied, as we now have two additional quantization error terms that contribute to the overall cost. A significant amount of additional effort is required in order to account for this new quantization error. %The key challenge in bounding the error terms induced by $Q(w_{k, \tau}^m - w_k), Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})$ is to show that both the local model parameters $w_{k, t}^m$, $w_{k, t}^{\textrm{ag}, m}$ converge to $w^*$ as number of communication rounds and local updates increase.
+
+In this section, we first define two condition sets of hyperparameters used for the convergence analysis of FedAQ. Then, we provide the proof sketch of FedAQ under one such condition set that leads to the better convergence rate $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1+q}{TK^3})$. The full proofs of lemmas, theorems, and corollaries under both condition sets are elaborated in \cref{app:proofs} and \cref{app:proofs2}. Finally, we discuss how we obtain the new convergence rate for \cite{Yeojoon-haddadpour2021federated} and look into more theoretical details on contribution \ref{contribution2} in Introduction.  %The full proofs of lemmas, theorems, and corollaries are elaborated in Appx.~\ref{app:proofs} and Appx.~\ref{app:proofs2}. %Let us first dive into the proof sketch of FedAQ under the condition set (\ref{parameter_FedAQ}).
+
+\subsection{Two Parameter Condition Sets}
+
+We carefully determine two parameter condition sets that theoretically ensure the convergence guarantees. The first one is
+\begin{align} \label{parameter_FedAQ}
+    \eta, \gamma \in \Big( 0, \frac{1}{L} \Big], \gamma = \max \Big( \sqrt{\frac{\eta}{\mu\tau}}, \eta \Big), \alpha = \frac{1}{\gamma\mu}, \beta = \alpha + 1
+\end{align}
+We add one more condition $\gamma \in (0, \frac{1}{L}]$ to the FedAC-I condition \cite{Yeojoon-yuan2020federated} and create our parameter condition set (\ref{parameter_FedAQ}). The second one is
+\begin{align} \label{parameter2_FedAQ}
+    \eta, \gamma \in \Big( 0, \frac{1}{L} \Big], \gamma = \max \Big( \sqrt{\frac{\eta}{\mu\tau}}, \eta \Big), \alpha=\frac{3}{2\gamma\mu} - \frac{1}{2}, \beta = \frac{2\alpha^2-1}{\alpha-1}, \gamma\mu \leq \frac{3}{4}
+\end{align}
+We add two more conditions $\gamma \in (0, \frac{1}{L}]$ and $\gamma\mu \leq \frac{3}{4}$ to the FedAC-II condition to build our parameter condition set (\ref{parameter2_FedAQ}). Even though quantization adds complexity to the algorithm, these weak assumptions are the only additional requirements for showing the convergence of FedAQ. Moreover, although the better convergence rate $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1+q}{TK^3})$ is obtained from the condition set (\ref{parameter2_FedAQ}), we also analyze the convergence of FedAQ under the condition set (\ref{parameter_FedAQ}) because this set empirically leads to more stable training and better performance in experiments than the condition set (\ref{parameter2_FedAQ}) (See Strongly convex case in \cref{qualitative_analysis}). The intuition of the less stable training of FedAQ under the condition set (\ref{parameter2_FedAQ}) comes from larger $\alpha, \beta$ than those of the condition set (\ref{parameter_FedAQ}). If $\alpha, \beta$ are too large, $\alpha^{-1}, \beta^{-1}$ in Algorithm \ref{algorithm1} cannot be used as proper coupling coefficients for local parameters $w_{k, t}^m, w_{k, t}^{\textrm{ag}, m}, w_{k, t}^{\textrm{md}, m}$. This results in aggressive updates and less stable training behavior.
+
+\subsection{Proof Sketch of FedAQ Under Condition Set (\ref{parameter2_FedAQ})}
+
+The decentralized potential $\Phi_{k, t}$ \cite{Yeojoon-yuan2020federated} is used for our convergence analysis. People commonly use this potential for acceleration analysis \cite{Yeojoon-bansal2019potential}.
+\begin{gather*}
+    \Phi_{k, t} = F(\Bar{w}_{k, t}^{\textrm{ag}}) -F^* + \frac{1}{6} \mu \|\Bar{w}_{k, t} - w^*\|^2
+\end{gather*}
+$\Bar{w}_{k, t}$ and $\Bar{w}_{k, t}^{\textrm{ag}}$ is respectively the average of $w_{k, t}^m$ and $w_{k, t}^{\textrm{ag, m}}$ for all $m$. Here, we additionally define $\Phi_k$ as below.
+\begin{gather*}
+    \Phi_k := \Phi_{k, 0} = F(w_k^{\textrm{ag}}) - F^* + \frac{1}{6} \mu \|w_k - w^*\|^2
+\end{gather*}
+Since $w_k$ and $w_k^{\textrm{ag}}$ are parameters obtained after $k$th synchronization in a server side, $\Phi_k$ can be considered as the potential of server models. $\Phi_k$ is essential to show the convergence of FedAQ because there is the computation of the quantizer between $\Phi_{k-1, \tau}$ and $\Phi_{k, 0}$. Thus, we should not naively track $\Phi_{k, t}$ but track $\Phi_k$ for our analysis. Obtaining $\Phi_k \leq \epsilon$ would imply that $F(w_k^{\textrm{ag}}) - F^* \leq \epsilon$ and since $F^* \leq F(w_k^{\textrm{ag}})$, it would also imply that $\|w_k - w^*\|^2 = O(\epsilon)$, thus obtaining convergence in terms of both the objective value and the iterate.
+
+Our goal is to show the convergence of FedAQ and derive the simplified convergence rate so that we can get the number of communication rounds to achieve a linear speedup in $M$. As the first step to show this, we prove Lemma \ref{lemmaD.1} which represents the relationship between two consecutive server potential functions $\Phi_k$ and $\Phi_{k+1}$. The quantization scheme amplifies the instability to the convergence of FedAQ in addition to the effect of acceleration. Despite this challenge, we derive Lemma \ref{lemmaD.1} with the help of subtle Propositions (See \cref{app:proof_lemma2}).
+
+% \begin{lemma} \label{lemma3.1}
+%  Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption1}, \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{1}{\gamma\mu}, \beta=\alpha+1, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta, \gamma \in (0, \frac{1}{L}], \tau \geq 2, $ FedAQ yields
+%  \begin{align*}
+%      \mathbb{E}[&\Psi_{k+1}] \leq C(\gamma, \tau) \mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L+\frac{\gamma^2\mu}{M})\tau\sigma^2 \\
+%      &+ \gamma\mu L \tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\| \|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|] \\
+%      &+ \underbrace{\frac{q}{M}(\gamma^2\mu+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big(\frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\tau^3\sigma^2}_{\textrm{Additional terms due to quantization}}
+%  \end{align*}
+%  Where $C(\gamma, \tau)$ is defined as
+%  \begin{align*}
+%      C(\gamma, \tau) = (1-\gamma\mu)^\tau + \underbrace{\frac{q}{M}\Big( \frac{4\gamma^2\mu(\mu + L)}{(1+\gamma\mu)^2} + \frac{2L\gamma^2(\mu+L)}{1+\gamma\mu}\Big)\tau^2}_{\textrm{Additional terms due to quantization}}
+%  \end{align*}
+% \end{lemma}
+
+\begin{lemma} \label{lemmaD.1}
+ Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption1}, \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{3}{2\gamma\mu} - \frac{1}{2}, \beta=\frac{2\alpha^2-1}{\alpha-1}, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta, \gamma \in (0, \frac{1}{L}], \gamma\mu \leq \frac{3}{4},\tau \geq 2, $ FedAQ yields
+ \begin{align*}
+     \mathbb{E}[\Phi_{k+1}] &\leq D(\gamma, \tau) \mathbb{E}[\Phi_k] + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} + \gamma\tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}})- \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\\
+     &+ \underbrace{\frac{q}{M}(\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big( (\gamma-\eta)^2 \gamma^2\mu^2 (\frac{\mu}{3} + \frac{L}{4}) + \gamma^4 (\frac{\mu}{3} + L)^2 L \Big)\tau^3\sigma^2}_{\textrm{additional terms due to quantization}}
+ \end{align*}
+ Where $D(\gamma, \tau)$ is defined as
+ \begin{align*}
+     D(\gamma, \tau) &= (1-\frac{1}{3}\gamma\mu)^\tau + \underbrace{\frac{q}{M}\Big( \gamma^2\mu(\frac{8}{3}\mu + 2L) + 2\gamma^2 L(\frac{\mu}{3} + L)\Big)\tau^2}_{\textrm{additional terms due to quantization}}
+ \end{align*}
+\end{lemma}
+
+We get the inequality between $\Phi_k$ and $\Phi_{k+1}$ by finding the upper bounds of error terms due to multiple($\tau$) local steps and the quantization step. The upper bound of the error caused by multiple local steps is obtained with the help of the analysis in \cite{Yeojoon-yuan2020federated} (See Proposition \ref{propositionD.3}). Also, we get the tight upper bound of the error due to quantization with our new proof techniques (See Proposition \ref{propositionD.4}, \ref{propositionD.5}, \ref{propositionD.6}). The key challenge in bounding the quantization error terms comes from representing the upper bound of variances of the quantizer $Q$ on two local updates $w_{k, \tau}^m - w_k, w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}$ in the form of a server potential $\Phi_k$. Some terms in Lemma \ref{lemmaD.1} are similar to those in Lemma C.2 of the FedAC paper \cite{Yeojoon-yuan2020federated}, but our lemma contains additional terms that emerge from the quantization scheme.
+
+For the next step, by telescoping Lemma \ref{lemmaD.1}, we obtain the main theoretical result Theorem \ref{theorem2}. Theorem \ref{theorem2} represents how $\Phi_K$ decreases from the initial potential $\Phi_0$ as a communication round $K$ increases. Since we aim to telescope Lemma \ref{lemmaD.1}, $D(\gamma, \tau)$ should be smaller than 1. Specifically, we show $D(\gamma, \tau) \leq 1-\frac{1}{6}\gamma\mu\tau$ with condition (\ref{condition2}) (See \cref{app:proof_theorem2}). That's why Theorem \ref{theorem2} requires the learning rate $\gamma$ to satisfy the certain condition (\ref{condition2}).
+
+% \begin{theorem} \label{theorem1}
+%     Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption1}, \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{1}{\gamma\mu}, \beta=\alpha+1, \gamma = \max(\eta, \sqrt{\frac{\eta}{\mu\tau}}), \eta, \gamma \in (0, \frac{1}{L}], \tau \geq 2, $ if the learning rate $\gamma$ satisfies
+%     \begin{align} \label{condition1}
+%         \Big(\mu^2 + \frac{q}{M}(\mu+L)(4\mu+2L)\Big)\gamma\tau \leq \frac{1}{2}\mu
+%     \end{align}
+%     FedAQ yields
+%     \begin{align*}
+%         &\mathbb{E}[\Psi_K] \leq \exp{\Big(-\frac{1}{2}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})K\tau\Big)} \Psi_0 + (2q+1)(\frac{\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{\eta\sigma^2}{M}) + 14\eta^2 L\tau\sigma^2 \\
+%         &+ \frac{(780+\frac{2q}{M})\eta^{\frac{3}{2}}L\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}} + \frac{(\mu+L)(\mu^2+\mu L+L^2)q\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{5}{2}}M} + \frac{q\eta^3\tau^2(\mu+L)^2 L\sigma^2}{\mu M}
+%     \end{align*}
+% \end{theorem}
+
+\begin{theorem} \label{theorem2}
+    Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption1}, \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for the parameter condition set (\ref{parameter2_FedAQ}), $\tau \geq 2, $ if the learning rate $\gamma$ satisfies
+    \begin{align} \label{condition2}
+        \bigg( \frac{1}{9}\mu^2 +\frac{q}{M}\Big( \mu(\frac{8}{3}\mu +2L) + 2L(\frac{\mu}{3}+L)\Big)\bigg)\gamma\tau \leq \frac{1}{6}\mu
+    \end{align}
+    FedAQ yields
+    \begin{align*}
+        \mathbb{E}[\Phi_K] &\leq \exp{\Big(-\frac{1}{6}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})K\tau\Big)} \Phi_0 + \frac{2(2q+1)\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{8(q+25)\eta^2 L^2\tau\sigma^2}{\mu} \\
+        &+ \frac{3q\Big(\mu^2(\frac{\mu}{3}+\frac{L}{4}) + L(\frac{\mu}{3}+L)^2\Big)\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{5}{2}}M} + \frac{3qL(\frac{\mu}{3}+L)^2 \eta^3\tau^2\sigma^2}{\mu M}
+    \end{align*}
+\end{theorem}
+
+We get the convergence rate of FedAQ with respect to $\eta$ under the condition set (\ref{parameter2_FedAQ}). The final step is to tune $\eta$ appropriately and obtain a more intuitive form of convergence rate that we can easily analyze a linear speedup in $M$. The exact form of this can be found in Corollary \ref{corollary2}. Here, we introduce the simplified form of Corollary \ref{corollary2}.
+
+% \begin{corollary} \label{corollary1}
+%     Let $C_1, C_2,\textrm{ and } \eta_0$ as below. Note that $T = K\tau$.
+%     \begin{align*}
+%         C_1 &= \frac{(\mu+L)(\mu^2+\mu L+L^2)q}{\mu^{\frac{5}{2}}}, \textrm{ } C_2 = \frac{q(\mu+L)^2 L}{\mu} \\
+%         \eta_0 &= \frac{4\tau}{\mu T^2}\log^2\Big(e+\min(\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}, \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}, \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}) \Big)
+%     \end{align*}
+%     Then for $\eta = \min(\frac{1}{L}, \eta_0)$, FedAQ yields
+%     \begin{align}
+%         &\mathbb{E}[\Psi_K] \leq \min \Big( \exp(-\tfrac{\mu T}{2L}), \exp(-\tfrac{\mu^{\tfrac{1}{2}}T}{2 L^{\tfrac{1}{2}}\tau^{\tfrac{1}{2}}})\Big) \Psi_0 \nonumber \\
+%         &+ \tfrac{7(2q+1)\sigma^2}{\mu MT} \log^2 \Big(e+\tfrac{\mu M T \Psi_0}{(2q+1)\sigma^2}\Big) \\
+%         &+ \tfrac{(6465+\tfrac{16q}{M})L\tau^2\sigma^2}{\mu^2 T^3}\log^4 \Big(e+ \tfrac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}\Big) \\
+%         &+ \tfrac{9(\mu^{\tfrac{3}{2}}C_1+8C_2)\tau^2\sigma^2}{\mu^3 M T^3} \log^6 \Big(e + \tfrac{\mu^3 M T^3\Psi_0}{(\mu^{\tfrac{3}{2}}C_1+8C_2)\tau^2\sigma^2}\Big)
+%     \end{align}
+% \end{corollary}
+% \begin{corollary} \label{corollary2}
+%     Let $D_1, D_2,\textrm{ and } \eta_0$ as below. Note that $T = K\tau$.
+%     \begin{align*}
+%         D_1 &= \frac{\Big( \mu^2(\frac{\mu}{3}+\frac{L}{4}) + L(\frac{\mu}{3}+L)^2) \Big)q}{\mu^{\frac{5}{2}}}, \textrm{ } D_2 = \frac{q(\frac{\mu}{3}+L)^2 L}{\mu} \\
+%         \eta_0 &= \frac{36\tau}{\mu T^2}\log^2\Big(e+\min(\frac{\mu M T \Phi_0}{(2q+1)\sigma^2}, \frac{\mu^3 T^4\Phi_0}{(q+25)L^2\tau^3\sigma^2}, \frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+6^3 D_2)\tau^2\sigma^2}) \Big)
+%     \end{align*}
+%     Then for $\eta = \min(\frac{1}{L}, \eta_0)$, FedAQ yields
+%     \begin{align}
+%         \mathbb{E}[\Phi_K] &\leq \min \Big( \exp(-\frac{\mu T}{6L}), \exp(-\frac{\mu^{\frac{1}{2}}T}{6 L^{\frac{1}{2}}\tau^{\frac{1}{2}}})\Big) \Phi_0 \nonumber\\
+%         &+ \frac{13(2q+1)\sigma^2}{\mu MT} \log^2 \Big(e+\frac{\mu M T \Phi_0}{(2q+1)\sigma^2}\Big) \\
+%         &+ \frac{10369(q+25)L^2\tau^3\sigma^2}{\mu^3 T^4}\log^4 \Big(e+ \frac{\mu^3 T^4\Phi_0}{(q+25)L^2\tau^3\sigma^2}\Big) \\
+%         &+ \frac{649(\mu^{\frac{3}{2}}D_1+216D_2)\tau^2\sigma^2}{\mu^3 M T^3} \log^6 \Big(e + \frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+216 D_2)\tau^2\sigma^2}\Big)
+%     \end{align}
+% \end{corollary}
+\begin{corollary}
+    (Simplified form of Corollary \ref{corollary2}) Note that $T = K\tau$. For $\eta = \min(\frac{1}{L}, \tilde{\Theta} (  \frac{\tau}{\mu T^2} ))$, FedAQ yields
+    \begin{align*}
+        \mathbb{E}[\Phi_K] &\leq \min \Big( \exp(-\frac{\mu T}{6L}), \exp(-\frac{\mu^{\frac{1}{2}}T}{6 L^{\frac{1}{2}}\tau^{\frac{1}{2}}})\Big) \Phi_0 + \Tilde{\mathcal{O}}( \underbrace{\frac{(1+q)\sigma^2}{\mu MT}}_{\textrm{I}} + \underbrace{\frac{(1+q)L^2\tau^3\sigma^2}{\mu^3 T^4}}_{\textrm{II}} + \underbrace{\frac{qL^3 \tau^2 \sigma^2}{\mu^4 M T^3}}_{\textrm{III}})
+    \end{align*}
+\end{corollary}
+
+The convergence rate of FedAQ under the condition set (\ref{parameter_FedAQ}) is obtained in a similar way. The convergence analysis under the condition set (\ref{parameter_FedAQ}) is elaborated as Lemma \ref{lemma3.1}, Theorem \ref{theorem1}, and Corollary \ref{corollary1} in \cref{app:proofs}.
+
+\begin{remark} \label{remark5.4} The above convergence rate is worse than the convergence rate of FedAC-II according to Theorem C.13 in \cite{Yeojoon-yuan2020federated} because there are additive terms related to the quantization noise $q$ in our case. Let's figure out the dominant terms with $\Tilde{\mathcal{O}}$ notation from the above convergence rate. Here, we replace $\tau$ with $\frac{T}{K}$. At first, we can ignore the first term because it decreases exponentially. The second term I would be $\Tilde{\mathcal{O}}(\frac{1+q}{MT})$. Then, the third term II becomes $\Tilde{\mathcal{O}}(\frac{(1+q)\tau^3}{T^4}) = \Tilde{\mathcal{O}}(\frac{1+q}{TK^3})$. Finally, the last term III turns into $\Tilde{\mathcal{O}}(\frac{q\tau^2}{MT^3}) = \Tilde{\mathcal{O}}(\frac{q}{MTK^2})$. Thus, the overall convergence rate of FedAQ under the condition set (\ref{parameter2_FedAQ}) would be $\Tilde{\mathcal{O}}(\frac{1+q}{MT} + \frac{1+q}{TK^3})$. Similarly, we obtain the simplified convergence rate of FedAQ under the condition set (\ref{parameter_FedAQ}) from three terms (14), (15), (16) of Corollary \ref{corollary1}. In this case, the convergence rate of FedAQ is $\Tilde{\mathcal{O}}(\frac{1+q}{MT} + \frac{1}{TK^2})$, and the required number of communication rounds to achieve a linear speedup in $M$ is $\Tilde{\mathcal{O}}((\frac{M}{1+q})^{\frac{1}{2}})$. \end{remark}
+
+\begin{remark} \label{remark5.5} As we mention above, FedAQ converges at rate $\Tilde{\mathcal{O}}(\frac{1+q}{MT} + \frac{1+q}{TK^3})$, which is better than the convergence rate of \cite{Yeojoon-haddadpour2021federated} $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1}{TK})$. To our knowledge, \cite{Yeojoon-haddadpour2021federated} obtain the best convergence rate among previous quantization-based federated optimization algorithms. Actually, in the strongly-convex and homogeneous case, \cite{Yeojoon-haddadpour2021federated} provide different convergence rate $\mathcal{O}(\frac{1}{\gamma^2\tau} + \frac{(q+1)}{(\frac{q}{M}+1)\tau M}) = \mathcal{O}(\frac{K}{\gamma^2 T} + \frac{(q+1)K}{(\frac{q}{M}+1)T M})$, where $\gamma$ is a learning rate for the server updates. They achieve this convergence rate by tuning $\eta = \frac{1}{2L(\frac{q}{M} + 1)\tau \gamma}$. However, we cannot say this algorithm achieves a linear speedup in this scenario. That's why we provide a new convergence rate $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1}{TK})$ for \cite{Yeojoon-haddadpour2021federated} by tuning $\eta$ in a different way. This new $\eta$ makes this algorithm achieve a linear speedup. Why the original $\eta$ cannot achieve a linear speedup and how we get new $\eta$ can be found in \cref{app:fedcomgate}.
+\end{remark}
+
+\subsection{Proof Details for FedAQ under Condition Set (\ref{parameter_FedAQ})}
+\label{app:proofs}
+
+Before diving into proof details, we define $\Bar{w}_{k, \tau}, \Bar{w}_{k, \tau}^{\textrm{ag}}, \Psi_{k, t}^m, \Psi_{k, t}, \Psi_k, A_{k, t}^m$ as below.
+\begin{align*}
+    \Bar{w}_{k, \tau} &= \frac{1}{M} \sum_{m=1}^M w_{k, \tau}^m \\
+    \Bar{w}_{k, \tau}^{\textrm{ag}} &= \frac{1}{M} \sum_{m=1}^M w_{k, \tau}^{\textrm{ag}, m} \\
+    \Psi_{k, t}^m &= F(w_{k, t}^{\textrm{ag}, m}) - F^* + \frac{1}{2} \mu \|w_{k, t}^m - w^*\|^2\\
+    \Psi_{k, t} &= \frac{1}{M} \sum_{m=1}^M F(w_{k, t}^{\textrm{ag}, m}) -F^* + \frac{1}{2} \mu \|\Bar{w}_{k, t} - w^*\|^2 \\
+    \Psi_k :&= \Psi_{k, 0} = F(w_k^{\textrm{ag}}) - F^* + \frac{1}{2} \mu \|w_k - w^*\|^2\\
+    A_{k, t}^m &= \frac{\gamma^2\mu^2 (\mu+L)}{(1+\gamma\mu)^2}\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2 + \gamma^2(\mu + L)\frac{2L}{1+\gamma\mu}\Psi_{k, t}^m
+    %\chi_{k, t}^m &= \frac{\mu}{2}\|w_{k, t}^m - w_k\|^2 + \frac{L}{2} \|w_{k, t}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2
+\end{align*}
+The above notations are essential to our convergence analysis. Intuitively, if the FedAQ algorithm converges to the optimal point, $\Bar{w}_{k, \tau}, \Bar{w}_{k, \tau}^{\textrm{ag}}$ become $w^*$, and $\Psi_{k, t}^m, \Psi_{k, t}, \Psi_k, A_{k, t}^m$ become 0. In order to denote the $\sigma$-algebra generated by $\{w_{k^\prime, t^\prime}^m, w_{k^\prime, t^\prime}^{\textrm{ag}, m}\}_{(k^\prime < k) \textrm{ or } (k^\prime = k, t^\prime \leq t), m \in [M]}$, we use $\mathcal{F}_{k, t}$.
+
+\subsubsection{Proof of Lemma \ref{lemma3.1}}
+\label{app:proof_lemma}
+
+\begin{lemma} \label{lemma3.1}
+ Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption1}, \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{1}{\gamma\mu}, \beta=\alpha+1, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta, \gamma \in (0, \frac{1}{L}], \tau \geq 2, $ FedAQ yields
+ \begin{align*}
+     \mathbb{E}[&\Psi_{k+1}] \leq C(\gamma, \tau) \mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L+\frac{\gamma^2\mu}{M})\tau\sigma^2 \\
+     &+ \gamma\mu L \tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\| \|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|] \\
+     &+ \underbrace{\frac{q}{M}(\gamma^2\mu+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big(\frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\tau^3\sigma^2}_{\textrm{Additional terms due to quantization}}
+ \end{align*}
+ Where $C(\gamma, \tau)$ is defined as
+ \begin{align*}
+     C(\gamma, \tau) = (1-\gamma\mu)^\tau + \underbrace{\frac{q}{M}\Big( \frac{4\gamma^2\mu(\mu + L)}{(1+\gamma\mu)^2} + \frac{2L\gamma^2(\mu+L)}{1+\gamma\mu}\Big)\tau^2}_{\textrm{Additional terms due to quantization}}
+ \end{align*}
+\end{lemma}
+
+
+In this section, we first introduce five crucial Propositions for proving Lemma \ref{lemma3.1}. Then, we prove Lemma \ref{lemma3.1} by using Propositions in the last part of this section.
+\begin{proposition} \label{proposition3.2}
+Let Assumption \ref{assumption1} hold and consider any $k$ synchronization round. Then, we can decompose the expectation as follows:
+\begin{align*}
+    \mathbb{E}[\|w_{k+1} - w^*\|^2] &= \mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau}\|^2] + \mathbb{E}[\|\Bar{w}_{k, \tau} - w^*\|^2] \\
+    \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - F^*] &= \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - \frac{1}{M} \sum_{m=1}^M F(w_{k, \tau}^{\textrm{ag}, m})] + \mathbb{E}[\frac{1}{M} \sum_{m=1}^M F(w_{k, \tau}^{\textrm{ag}, m}) - F^*]
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{proposition3.2}} \textrm{ } The second equality is trivial. Let's focus on the first equality. By Assumption \ref{assumption1}, the quantizer $Q$ is unbiased and we get,
+\begin{align*}
+    \mathbb{E}_Q[w_{k+1}] &= w_k + \frac{1}{M}\sum_{m=1}^M \mathbb{E}_Q Q(w_{k, \tau}^m - w_k) = \frac{1}{M} \sum_{m=1}^M w_{k, \tau}^m = \Bar{w}_{k, \tau}
+\end{align*}
+Thus, we finally obtain
+\begin{align*}
+    \mathbb{E}[\|w_{k+1} - w^*\|^2] &= \mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau} + \Bar{w}_{k, \tau} - w^*\|^2] \\
+    &= \mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau}\|^2] + \mathbb{E}[\|\Bar{w}_{k, \tau} - w^*\|^2]
+\end{align*}
+
+\begin{proposition} \label{proposition3.3}
+Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{1}{\gamma\mu}, \beta=\alpha+1, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta \in (0, \frac{1}{L}]$, FedAQ yields
+\begin{align*}
+    \mathbb{E}[\Psi_{k, \tau}] &\leq (1-\gamma\mu)^\tau \mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L + \frac{\gamma^2\mu}{M})\tau\sigma^2 + \gamma\mu L \tau \\
+    &\cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|]
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{proposition3.3}} \textrm{ } We refer to the proof of Lemma B.2 in \cite{Yeojoon-yuan2020federated}. There is no quantization between $\Psi_{k, \tau}$ and $\Psi_k$. Thus, we can directly apply useful inequalities in the proof of Lemma B.2 in \cite{Yeojoon-yuan2020federated} to our proof. Then, we obtain
+\begin{align*}
+    \mathbb{E}[\Psi_{k, t+1}|\mathcal{F}_{k, t}] &\leq (1-\gamma\mu) \Psi_{k, t} + \frac{1}{2}(\eta^2 L + \frac{\gamma^2\mu}{M})\sigma^2 + \gamma\mu L \\
+    &\cdot \frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|
+\end{align*}
+From the above relationship between $\Psi_{k, t+1}$ and $\Psi_{k, t}$, we get
+\begin{align*}
+    \mathbb{E}[\Psi_{k, \tau}] &\leq (1-\gamma\mu)^\tau \mathbb{E}[\Psi_k] + \Big(\sum_{t=0}^{\tau-1} (1-\gamma\mu)^t \Big)\frac{1}{2}(\eta^2 L + \frac{\gamma^2\mu}{M})\sigma^2 + \gamma\mu L \cdot \sum_{t=0}^{\tau-1} \Big\{ (1-\gamma\mu)^{\tau-t-1} \\
+    &\mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|]\Big\} \\
+    &\leq (1-\gamma\mu)^\tau \mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L + \frac{\gamma^2\mu}{M})\tau\sigma^2 + \gamma\mu L \tau \\
+    &\cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|]
+\end{align*}
+
+\begin{proposition} \label{proposition3.4}
+Let Assumption \ref{assumption1} hold. Then, we have
+\begin{align*}
+    \mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau}\|^2] &\leq \frac{q}{M^2}\sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] \\
+    \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - \frac{1}{M} \sum_{m=1}^M F(w_{k, \tau}^{\textrm{ag}, m})] &\leq \frac{qL}{2M^2} \sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2]
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{proposition3.4}} \textrm{ } First, let's consider the first inequality. According to Assumption \ref{assumption1}, we get
+\begin{align*}
+    \mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau}\|^2] &= \mathbb{E}[\|w_k + \frac{1}{M} \sum_{m=1}^M Q(w_{k, \tau}^m - w_k) - \frac{1}{M} \sum_{m=1}^M w_{k, \tau}^m\|^2] \\
+    &= \mathbb{E}[\|\frac{1}{M} \sum_{m=1}^M Q(w_{k, \tau}^m - w_k) - (w_{k, \tau}^m - w_k)\|^2] \\
+    &= \frac{1}{M^2} \sum_{m=1}^M \mathbb{E}[\|Q(w_{k, \tau}^m - w_k) - (w_{k, \tau}^m -w_k)\|^2] \leq \frac{q}{M^2} \sum_{m=1}^M \mathbb{E} \|w_{k, \tau}^m - w_k\|^2
+\end{align*}
+The third equality comes from the unbiasedness of $Q$, and the last inequality stems from the variance assumption of $Q$. Similarly, we obtain
+
+\begin{align*}
+    \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - \frac{1}{M} \sum_{m=1}^M F(w_{k, \tau}^{\textrm{ag}, m})] &= \mathbb{E}[F(w_k^{\textrm{ag}} + \frac{1}{M}\sum_{m=1}^M Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})) - \frac{1}{M} \sum_{m=1}^M F(w_{k, \tau}^{\textrm{ag}, m})] \\
+    &= \mathbb{E}[\frac{1}{M} \sum_{m=1}^M F(w_k^{\textrm{ag}} + \frac{1}{M}\sum_{m=1}^M Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})) - F(w_{k, \tau}^{\textrm{ag}, m})] \\
+    &\leq \mathbb{E}\Big[\frac{1}{M} \sum_{m=1}^M \langle \nabla F(w_{k, \tau}^{\textrm{ag}, m}), \frac{1}{M} \sum_{m=1}^M \Big( Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}) - (w_{k, \tau}^{\textrm{ag}, m} \\
+    &- w_k^{\textrm{ag}})\Big) \rangle + \frac{L}{2} \|\frac{1}{M} \sum_{m=1}^M  Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}) - (w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})\|^2\Big] \\
+    &= \frac{L}{2} \mathbb{E}[\|\frac{1}{M} \sum_{m=1}^M  Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}) - (w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})\|^2] \\
+    &= \frac{L}{2M^2}\sum_{m=1}^M \mathbb{E}[\| Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}) - (w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})\|^2] \\
+    &\leq \frac{qL}{2M^2} \sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2]
+\end{align*}
+
+\begin{proposition} \label{proposition3.5}
+Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{1}{\gamma\mu}, \beta=\alpha+1, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta, \gamma \in (0, \frac{1}{L}], $ we get
+\begin{align*}
+    \mathbb{E}[A_{k, t}^m] \leq \mathbb{E}[A_{k, 0}^m] + \Big( \frac{(\gamma-\eta)^2(\mu+L)}{1+\gamma\mu}+\frac{\gamma^2(\mu+L)^2 L}{\mu^2}\Big)\cdot \Big( 1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\Big)\sigma^2
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{proposition3.5}}
+\textrm{ } From the notation mentioned in the beginning of \cref{app:proofs},
+\begin{align} \label{eq3.5-1}
+    \mathbb{E}[A_{k, t+1}^m|\mathcal{F}_{k, t}] &= \frac{\gamma^2\mu^2 (\mu+L)}{(1+\gamma\mu)^2}\mathbb{E}[\|w_{k, t+1}^m - w_{k, t+1}^{\textrm{ag}, m}\|^2|\mathcal{F}_{k, t}] + \gamma^2(\mu+L)\frac{2L}{1+\gamma\mu}\mathbb{E}[\Psi_{k, t+1}^m|\mathcal{F}_{k, t}]
+\end{align}
+Thus, let's sequentially compute $\mathbb{E}[\|w_{k, t+1}^m - w_{k, t+1}^{\textrm{ag}, m}\|^2|\mathcal{F}_{k, t}]$ and $\mathbb{E}[\Psi_{k, t+1}^m|\mathcal{F}_{k, t}]$.
+\begin{align*}
+    \mathbb{E}[\|w_{k, t+1}^m - w_{k, t+1}^{\textrm{ag}, m}\|^2|\mathcal{F}_{k, t}] &= \mathbb{E}[\|(1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - \gamma g_{k, t}^m - w_{k, t}^{\textrm{md}, m} + \eta g_{k, t}^m\|^2|\mathcal{F}_{k, t}] \\
+    &= \mathbb{E}[\|(1-\alpha^{-1})(w_{k, t}^m - w_{k, t}^{\textrm{md}, m}) - (\gamma-\eta)g_{k, t}^m\|^2|\mathcal{F}_{k, t}] \textrm{ } (\leftarrow \gamma \geq \eta) \\
+    &= \|(1-\alpha^{-1})(w_{k, t}^m - w_{k, t}^{\textrm{md}, m}) - (\gamma-\eta)\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 \\
+    &+ (\gamma - \eta)^2\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m}) - g_{k, t}^m\|^2|\mathcal{F}_{k, t}] \\
+    &\leq (1-\alpha^{-1})^2 \|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2 + (\gamma-\eta)^2 \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 \\
+    &+ (\gamma-\eta)^2 \sigma^2 - 2(\gamma-\eta) \langle (1-\alpha^{-1})(w_{k, t}^m - w_{k, t}^{\textrm{md}, m}), \nabla F(w_{k, t}^{\textrm{md}, m})\rangle \\
+    &\leq (1-\alpha^{-1})^2(1+\gamma\mu) \|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2 \\
+    &+ (\gamma-\eta)^2(1+\frac{1}{\gamma\mu}) \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + (\gamma-\eta)^2 \sigma^2 \\
+    &= \frac{(1-\gamma\mu)^2}{1+\gamma\mu}\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2 + (\gamma-\eta)^2\frac{1+\gamma\mu}{\gamma\mu}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + (\gamma-\eta)^2\sigma^2
+\end{align*}
+Here, we need to bound $\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2$.
+\begin{align} \label{ineq3.5-2}
+    \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 &\leq 2L(F(w_{k, t}^{\textrm{md}, m}) - F^*) \textrm{ }(\because \textrm{ Assumption \ref{assumption3}}) \nonumber\\
+    &\leq 2L\Big(\beta^{-1}(F(w_{k, t}^m)-F(w^*))+(1-\beta^{-1})(F(w_{k, t}^{\textrm{ag}, m})-F^*)\Big) \nonumber\\
+    &\leq \beta^{-1}L^2 \|w_{k, t}^m - w^*\|^2 + 2(1-\beta^{-1})L(F(w_{k, t}^{\textrm{ag}, m})-F^*) \nonumber\\
+    &= \frac{\gamma\mu L^2}{1+\gamma\mu}\|w_{k, t}^m - w^*\|^2 + \frac{2L}{1+\gamma\mu}(F(w_{k, t}^{\textrm{ag}, m})-F^*) \nonumber\\
+    &\leq \frac{\mu L}{1+\gamma\mu}\|w_{k, t}^m - w^*\|^2 + \frac{2L}{1+\gamma\mu}(F(w_{k, t}^{\textrm{ag}, m})-F^*) = \frac{2L}{1+\gamma\mu}\Psi_{k, t}^m
+\end{align}
+The last inequality comes from the fact $\gamma \in [0, \frac{1}{L})$. Therefore, we finally get
+\begin{align} \label{ineq3.5-3}
+    \mathbb{E}[\|w_{k, t+1}^m - w_{k, t+1}^{\textrm{ag}, m}\|^2|\mathcal{F}_{k, t}] &\leq \frac{(1-\gamma\mu)^2}{1+\gamma\mu}\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2 + (\gamma-\eta)^2\frac{1+\gamma\mu}{\gamma\mu}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + (\gamma-\eta)^2\sigma^2 \nonumber\\
+    &\leq \frac{(1-\gamma\mu)^2}{1+\gamma\mu}\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2 + (\gamma-\eta)^2\frac{1+\gamma\mu}{\gamma\mu}\Big(\frac{2L}{1+\gamma\mu}\Psi_{k, t}^m\Big) + (\gamma-\eta)^2\sigma^2
+\end{align}
+Now, let's compute $\mathbb{E}[\Psi_{k, t+1}^m|\mathcal{F}_{k, t}]$. We need to compute $\mathbb{E}[\|w_{k, t+1}^m-w^*\|^2|\mathcal{F}_{k, t}]$ and $\mathbb{E}[F(w_{k, t+1}^{\textrm{ag}, m}) - F^*|\mathcal{F}_{k, t}]$ first.
+\begin{align*}
+    \mathbb{E}[\|w_{k, t+1}^m-w^*\|^2|\mathcal{F}_{k, t}] &= \mathbb{E}[\|(1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - \gamma g_{k, t}^m -w^*\|^2|\mathcal{F}_{k, t}] \\
+    &\leq \|(1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - w^*\|^2 + \gamma^2 \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \gamma^2\sigma^2 \\
+    &- 2\gamma \langle (1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - w^*, \nabla F(w_{k, t}^{\textrm{md}, m})\rangle \\
+    &\leq (1-\alpha^{-1})\|w_{k, t}^m -w^*\|^2 + \alpha^{-1}\|w_{k, t}^{\textrm{md}, m}-w^*\|^2+ \gamma^2 \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \gamma^2\sigma^2 \\
+    &- 2\gamma \langle (1-\alpha^{-1}(1-\beta^{-1}))w_{k, t}^m + \alpha^{-1}(1-\beta^{-1})w_{k, t}^{\textrm{ag}, m} - w^*, \nabla F(w_{k, t}^{\textrm{md}, m})\rangle \\
+    &= (1-\gamma\mu)\|w_{k, t}^m -w^*\|^2 + \gamma\mu\|w_{k, t}^{\textrm{md}, m}-w^*\|^2+ \gamma^2 \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \gamma^2\sigma^2 \\
+    &- 2\gamma \langle \frac{1}{1+\gamma\mu}w_{k, t}^m + \frac{\gamma\mu}{1+\gamma\mu}w_{k, t}^{\textrm{ag}, m} - w^*, \nabla F(w_{k, t}^{\textrm{md}, m})\rangle
+\end{align*}
+\begin{align*}
+    \mathbb{E}[F(w_{k, t+1}^{\textrm{ag}, m}) - &F^* |\mathcal{F}_{k, t}] \\
+    &\leq \mathbb{E}[F(w_{k, t}^{\textrm{md}, m}) + \langle \nabla F(w_{k, t}^{\textrm{md}, m}), w_{k, t+1}^{\textrm{ag}, m} - w_{k, t}^{\textrm{md}, m} \rangle + \frac{L}{2}\|w_{k, t+1}^{\textrm{ag}, m} - w_{k, t}^{\textrm{md}, m}\|^2 - F^*|\mathcal{F}_{k, t}] \\
+    &\leq F(w_{k, t}^{\textrm{md}, m}) -F^* - \eta\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \\
+    &\leq F(w_{k, t}^{\textrm{md}, m}) -F^* - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \textrm{ }(\because 1-\frac{\eta L}{2} \geq \frac{1}{2} \leftarrow \eta \in [0, \frac{1}{L}]) \\
+    &= (1-\alpha^{-1})(F(w_{k, t}^{\textrm{ag}, m})-F^*) + \alpha^{-1}(F(w_{k, t}^{\textrm{md}, m}) -F^*) \\
+    &+ (1-\alpha^{-1})(F(w_{k, t}^{\textrm{md}, m}) - F(w_{k, t}^{\textrm{ag}, m})) - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2
+\end{align*}
+
+
+\begin{align*}
+    &\leq (1-\alpha^{-1})(F(w_{k, t}^{\textrm{ag}, m})-F^*) - \frac{\mu\alpha^{-1}}{2}\|w_{k, t}^{\textrm{md}, m}-w^*\|^2 + \alpha^{-1} \langle \nabla F(w_{k, t}^{\textrm{md}, m}), w_{k, t}^{\textrm{md}, m}-w^*\rangle \\
+    &+ (1-\alpha^{-1})\langle \nabla F(w_{k, t}^{\textrm{md}, m}), w_{k, t}^{\textrm{md}, m} - w_{k, t}^{\textrm{ag}, m}\rangle - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \\
+    &= (1-\alpha^{-1})(F(w_{k, t}^{\textrm{ag}, m})-F^*) - \frac{\mu\alpha^{-1}}{2}\|w_{k, t}^{\textrm{md}, m}-w^*\|^2 - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \\
+    &+ \alpha^{-1} \langle \nabla F(w_{k, t}^{\textrm{md}, m}), \alpha\beta^{-1}w_{k, t}^m + (1 - \alpha\beta^{-1})w_{k, t}^{\textrm{ag}, m} - w^*\rangle \\
+    &= (1-\gamma\mu)(F(w_{k, t}^{\textrm{ag}, m})-F^*) - \frac{\gamma\mu^2}{2}\|w_{k, t}^{\textrm{md}, m}-w^*\|^2 - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \\
+    &+ \gamma\mu\langle \frac{1}{1+\gamma\mu}w_{k, t}^m + \frac{\gamma\mu}{1+\gamma\mu}w_{k, t}^{\textrm{ag}, m} - w^*, \nabla F(w_{k, t}^{\textrm{md}, m})\rangle
+\end{align*}
+Then, we bound $\mathbb{E}[\Psi_{k, t+1}^m|\mathcal{F}_{k, t}]$ by using the above results.
+\begin{align} \label{ineq3.5-4}
+    \mathbb{E}[\Psi_{k, t+1}^m|\mathcal{F}_{k, t}] &= \frac{\mu}{2}\mathbb{E}[\|w_{k, t+1}^m-w^*\|^2|\mathcal{F}_{k, t}] + \mathbb{E}[F(w_{k, t+1}^{\textrm{ag}, m}) - F^*|\mathcal{F}_{k, t}] \nonumber\\
+    &\leq (1-\gamma\mu)\Psi_{k, t}^m - \frac{\eta - \gamma^2\mu}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\gamma^2\mu + \eta^2 L}{2}\sigma^2 \nonumber\\
+    &\leq (1-\gamma\mu)\Psi_{k, t}^m  + \frac{\gamma^2\mu + \eta^2 L}{2}\sigma^2 \textrm{ }(\because \gamma \leq \sqrt{\frac{\eta}{\mu}}) \nonumber\\
+    &\leq (1-\gamma\mu)\Psi_{k, t}^m  + \frac{\gamma^2(\mu+L)}{2}\sigma^2
+\end{align}
+Plugging (\ref{ineq3.5-3}), (\ref{ineq3.5-4}) in (\ref{eq3.5-1}) yields,
+\begin{align} \label{ineq3.5-5}
+    &\mathbb{E}[A_{k, t+1}^m|\mathcal{F}_{k, t}] \nonumber\\
+    &\leq \frac{\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2}\bigg(\frac{(1-\gamma\mu)^2}{1+\gamma\mu}\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2 + (\gamma-\eta)^2\frac{1+\gamma\mu}{\gamma\mu}\Big(\frac{2L}{1+\gamma\mu}\Psi_{k, t}^m\Big) + (\gamma-\eta)^2\sigma^2\bigg) \nonumber\\
+    &+ \gamma^2(\mu+L)\frac{2L}{1+\gamma\mu}\Big((1-\gamma\mu)\Psi_{k, t}^m+\frac{\gamma^2(\mu+L)}{2}\sigma^2\Big) \nonumber\\
+    &= \frac{(1-\gamma\mu)^2}{1+\gamma\mu}\cdot\frac{\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2}\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2 + \Big(\frac{\gamma\mu(\gamma-\eta)^2(\mu+L)}{1+\gamma\mu} +\gamma^2(\mu+L)(1-\gamma\mu)\Big)\frac{2L}{1+\gamma\mu}\Psi_{k, t}^m \nonumber\\
+    &+ \Big(\frac{\gamma^2\mu^2(\gamma-\eta)^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\sigma^2
+\end{align}
+Since $\eta \leq \gamma$, we get $(\gamma-\eta)^2 \leq \gamma^2$. By using this fact, we obtain
+\begin{align} \label{ineq3.5-6}
+    \frac{\gamma\mu(\gamma-\eta)^2(\mu+L)}{1+\gamma\mu} +\gamma^2(\mu+L)(1-\gamma\mu) &\leq \frac{\gamma^3\mu(\mu+L)}{1+\gamma\mu} +\gamma^2(\mu+L)(1-\gamma\mu) \nonumber\\
+    &= \gamma^2(\mu+L)(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})
+\end{align}
+It is easy to show that $1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu}<1$. Also, we get
+\begin{align} \label{ineq3.5-7}
+    \frac{(1-\gamma\mu)^2}{1+\gamma\mu} < 1-\gamma\mu < 1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu}
+\end{align}
+From (\ref{ineq3.5-5}), (\ref{ineq3.5-6}), and (\ref{ineq3.5-7}) we finally get
+\begin{align*}
+    \mathbb{E}[A_{k, t+1}^m|\mathcal{F}_{k, t}] &\leq (1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})A_{k, t}^m + \Big(\frac{\gamma^2\mu^2(\gamma-\eta)^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\sigma^2
+\end{align*}
+From this relationship between $A_{k, t+1}^m$ and $A_{k, t}^m$, we obtain the result of Proposition \ref{proposition3.5}.
+\begin{align*}
+    &\mathbb{E}[A_{k, t}^m] \\
+    &\leq (1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\mathbb{E}[A_{k, 0}^m] + \Big(\frac{\gamma^2\mu^2(\gamma-\eta)^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\sigma^2 \cdot \frac{1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t}{1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})} \\
+    &= (1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\mathbb{E}[A_{k, 0}^m] + \Big( \frac{(\gamma-\eta)^2(\mu+L)}{1+\gamma\mu}+\frac{\gamma^2(\mu+L)^2 L}{\mu^2}\Big)\sigma^2 \cdot \Big(1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\Big) \\
+    &\leq \mathbb{E}[A_{k, 0}^m] + \Big( \frac{(\gamma-\eta)^2(\mu+L)}{1+\gamma\mu}+\frac{\gamma^2(\mu+L)^2 L}{\mu^2}\Big)\cdot \Big( 1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\Big)\sigma^2
+\end{align*}
+
+\begin{proposition} \label{proposition3.6}
+Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{1}{\gamma\mu}, \beta=\alpha+1, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta, \gamma \in (0, \frac{1}{L}], \tau \geq 2,$ FedAQ yields
+\begin{align*}
+    \frac{\mu}{2}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] &\leq \Big( \frac{4\gamma^2\mu(\mu+L)}{(1+\gamma\mu)^2} + \frac{2L\gamma^2(\mu+L)}{1+\gamma\mu}\Big)\tau^2 \mathbb{E}[\Psi_k] + (\gamma^2\mu+\eta^2 L)\tau\sigma^2 \\
+    &+ \Big( \frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu} \Big) \frac{\tau^3\sigma^2}{2}
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{proposition3.6}} \textrm{ } Let's first bound $\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2]$ and $\mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2]$ individually.
+\begin{align*}
+    \mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] &= \mathbb{E}[\|(w_{k, \tau}^m-w_{k, \tau-1}^m) +\cdots+ (w_{k, 1}^m - w_{k, 0}^m)\|^2] \\
+    &= \mathbb{E}\Big[\Big\|\sum_{t=0}^{\tau-1}\Big((1-\alpha^{-1})w_{k, t}^m+\alpha^{-1}w_{k, t}^{\textrm{md, m}}-w_{k, t}^m-\gamma g_{k, t}^m\Big)\Big\|^2\Big] \\
+    &= \mathbb{E}\Big[\Big\|\alpha^{-1}\sum_{t=0}^{\tau-1}(w_{k, t}^{\textrm{md}, m}-w_{k, t}^m) - \gamma\sum_{t=0}^{\tau-1}g_{k, t}^m\Big\|^2\Big] \\
+    &\leq 2\alpha^{-2}\mathbb{E}[\|\sum_{t=0}^{\tau-1}(w_{k, t}^{\textrm{md}, m}-w_{k, t}^m)\|^2] + 2\gamma^2\mathbb{E}[\|\sum_{t=0}^{\tau-1}g_{k, t}^m\|^2]\\
+    &\leq 2\alpha^{-2}\tau\sum_{t=0}^{\tau-1}\mathbb{E}[\|w_{k, t}^{\textrm{md}, m}-w_{k, t}^m\|^2] + 2\gamma^2\mathbb{E}[\|\sum_{t=0}^{\tau-1}\nabla F(w_{k, t}^{\textrm{md}, m})\|^2] \\
+    &+ 2\gamma^2\mathbb{E}[\|\sum_{t=0}^{\tau-1}(g_{k, t}^m - \nabla F(w_{k, t}^{\textrm{md}, m}))\|^2]\\
+    &\leq 2\alpha^{-2}(1-\beta^{-1})^2\tau\sum_{t=0}^{\tau-1}\mathbb{E}[\|w_{k, t}^m-w_{k, t}^{\textrm{ag}, m}\|^2] + 2\gamma^2\tau\sum_{t=0}^{\tau-1}\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\\
+    &+ 2\gamma^2\sum_{t=0}^{\tau-1}\mathbb{E}[\|g_{k, t}^m - \nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\\
+    &= \tau \Big(\sum_{t=0}^{\tau-1} 2\alpha^{-2}(1-\beta^{-1})^2\mathbb{E}[\|w_{k, t}^m- w_{k, t}^{\textrm{ag}, m}\|^2 ] + 2\gamma^2\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\Big) +2\tau\gamma^2\sigma^2
+\end{align*}
+\begin{align*}
+    \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] &= \mathbb{E}[\|\sum_{t=0}^{\tau-1}(w_{k, t+1}^{\textrm{ag}, m}-w_{k, t}^{\textrm{ag}, m})\|^2] \\
+    &= \mathbb{E}[\|\sum_{t=0}^{\tau-1}(w_{k, t}^{\textrm{md}, m}-w_{k, t}^{\textrm{ag}, m}-\eta g_{k, t}^m)\|^2]\\
+    &\leq 2\mathbb{E}[\|\sum_{t=0}^{\tau-1}(w_{k, t}^{\textrm{md}, m} - w_{k, t}^{\textrm{ag}, m})\|^2] + 2\eta^2\mathbb{E}[\|\sum_{t=0}^{\tau-1}g_{k, t}^m\|^2]\\
+    &= 2\beta^{-2}\mathbb{E}[\|\sum_{t=0}^{\tau-1}(w_{k, t}^m - w_{k, t}^{\textrm{ag}, m})\|^2] + 2\eta^2\mathbb{E}[\|\sum_{t=0}^{\tau-1}\nabla F(w_{k, t}^{\textrm{md}, m})\|^2] \\
+    &+ 2\eta^2\mathbb{E}[\|\sum_{t=0}^{\tau-1}(g_{k, t}^m - \nabla F(w_{k, t}^{\textrm{md}, m}))\|^2]\\
+    &\leq 2\beta^{-2}\tau\sum_{t=0}^{\tau-1}\mathbb{E}[\|w_{k, t}^m-w_{k, t}^{\textrm{ag}, m}\|^2] + 2\eta^2\tau\sum_{t=0}^{\tau-1}\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\\
+    &+ 2\eta^2\sum_{t=0}^{\tau-1}\mathbb{E}[\|g_{k, t}^m - \nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\\
+    &= \tau \Big(\sum_{t=0}^{\tau-1} 2\beta^{-2}\mathbb{E}[\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2] + 2\eta^2\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\Big) +2\tau\eta^2\sigma^2
+\end{align*}
+Thus, by using the above results, we get
+\begin{align*}
+    &\frac{\mu}{2}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] \\
+    &\leq \tau \sum_{t=0}^{\tau-1} \Big\{ \Big(\mu\alpha^{-2}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\mathbb{E}[\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2] + (\gamma^2\mu + \eta^2 L)\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\Big\} \\
+    &+ (\gamma^2\mu+\eta^2 L)\tau\sigma^2 \\
+    &\leq \tau \sum_{t=0}^{\tau-1} \Big\{ \Big(\mu\alpha^{-2}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\mathbb{E}[\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2] + (\gamma^2\mu + \eta^2 L)\frac{2L}{1+\gamma\mu}\mathbb{E}[\Psi_{k, t}^m]\Big\} \\
+    &+ (\gamma^2\mu+\eta^2 L)\tau\sigma^2 \textrm{ }(\because (\ref{ineq3.5-2})) \\
+    &\leq \tau \sum_{t=0}^{\tau-1} \Big\{ \frac{\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2}\mathbb{E}[\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2] + \gamma^2(\mu+L)\frac{2L}{1+\gamma\mu}\mathbb{E}[\Psi_{k, t}^m]\Big\} + (\gamma^2\mu+\eta^2 L)\tau\sigma^2 \\
+    &= \tau \Big( \sum_{t=0}^{\tau-1} \mathbb{E}[A_{k, t}^m]\Big) + (\gamma^2\mu+\eta^2 L)\tau\sigma^2
+\end{align*}
+By Proposition \ref{proposition3.5} and the fact $\Psi_{k, 0}^m = \Psi_k$, we obtain
+\begin{align*}
+    &\frac{\mu}{2}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] \\
+    &\leq \tau \Big\{ \sum_{t=0}^{\tau-1} \mathbb{E}[A_{k, 0}^m] + \Big( \frac{(\gamma-\eta)^2(\mu+L)}{1+\gamma\mu}+\frac{\gamma^2(\mu+L)^2 L}{\mu^2}\Big) \cdot \Big( 1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\Big)\sigma^2 \Big\} \\
+    &+ (\gamma^2\mu+\eta^2 L)\tau\sigma^2 \\
+    &= \tau^2 \Big(\frac{\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2}\mathbb{E}[\|w_k-w_k^{\textrm{ag}}\|^2]+\gamma^2(\mu+L)\frac{2L}{1+\gamma\mu}\mathbb{E}[\Psi_k]\Big) \\
+    &+ \tau \Big( \frac{(\gamma-\eta)^2(\mu+L)}{1+\gamma\mu}+\frac{\gamma^2(\mu+L)^2 L}{\mu^2}\Big) \Big(\sum_{t=0}^{\tau-1} 1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\Big)\sigma^2 + (\gamma^2\mu+\eta^2 L)\tau\sigma^2
+\end{align*}
+Before we get to the final result, let's find the upper bound for $\|w_k - w_k^{\textrm{ag}}\|^2$, $\sum_{t=0}^{\tau-1}\Big( 1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\Big)$
+\begin{align*}
+    \|w_k - w_k^{\textrm{ag}}\|^2 &= \|w_k - w^* -(w_k^{\textrm{ag}}-w^*)\|^2 \nonumber\\
+    &\leq 2\|w_k - w^*\|^2 + 2\|w_k^{
+    \textrm{ag}}-w^*\|^2 \nonumber\\
+    &\leq 2\|w_k - w^*\|^2 + 2\cdot \frac{2}{\mu}\Big(F(w_k^{\textrm{ag}})-F^*-\langle\nabla F(w^*),w_k^{\textrm{ag}}-w^*\rangle\Big) \nonumber\\
+    &= 2\|w_k-w^*\|^2 + \frac{4}{\mu}(F(w_k^{\textrm{ag}})-F^*) = \frac{4}{\mu}\Psi_k
+\end{align*}
+\begin{align*}
+    \sum_{t=0}^{\tau-1}\Big( 1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t\Big) &= \tau - \sum_{t=0}^{\tau-1} (1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^t \\
+    &= \tau - \frac{1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})^\tau}{1-(1-\gamma\mu+\frac{\gamma\mu}{1+\gamma\mu})} \\
+    &\leq \tau - \frac{1-(1-\frac{\gamma^2\mu^2}{1+\gamma\mu}\tau + (\frac{\gamma^2\mu^2}{1+\gamma\mu})^2\frac{\tau(\tau-1)}{2})}{\frac{\gamma^2\mu^2}{1+\gamma\mu}} \\
+    &= \frac{\gamma^2\mu^2}{1+\gamma\mu}\cdot\frac{\tau(\tau-1)}{2} \leq \frac{\gamma^2\mu^2}{1+\gamma\mu}\cdot\frac{\tau^2}{2}
+\end{align*}
+Therefore, we conclude as below
+\begin{align*}
+    \frac{\mu}{2}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] &\leq \Big( \frac{4\gamma^2\mu(\mu+L)}{(1+\gamma\mu)^2} + \frac{2L\gamma^2(\mu+L)}{1+\gamma\mu}\Big)\tau^2 \mathbb{E}[\Psi_k] + (\gamma^2\mu+\eta^2 L)\tau\sigma^2 \\
+    &+ \Big( \frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu} \Big) \frac{\tau^3\sigma^2}{2}
+\end{align*}
+
+\emph{Proof of Lemma \ref{lemma3.1}} \textrm{ } By the definition of $\Psi_k, \Psi_{k, t}$ and Proposition \ref{proposition3.2},
+\begin{gather*}
+    \mathbb{E}[\Psi_{k+1}] = \mathbb{E}[\Psi_{k, \tau}] + \frac{\mu}{2}\mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau}\|^2] + \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - \frac{1}{M} \sum_{m=1}^M F(w_{k, \tau}^{\textrm{ag}, m})]
+\end{gather*}
+Applying Proposition \ref{proposition3.3} and Proposition \ref{proposition3.4}, we have
+\begin{align*}
+    &\mathbb{E}[\Psi_{k+1}] \\
+    &\leq (1-\gamma\mu)^\tau \mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L + \frac{\gamma^2\mu}{M})\tau\sigma^2 \\
+    &+ \gamma\mu L \tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|] \\
+    &+ \frac{q\mu}{2M^2}\sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{qL}{2M^2} \sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] \\
+    &\leq (1-\gamma\mu)^\tau \mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L + \frac{\gamma^2\mu}{M})\tau\sigma^2 \\
+    &+ \gamma\mu L \tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|] \\
+    &+ \frac{q}{M}\Big[ \Big( \frac{4\gamma^2\mu(\mu+L)}{(1+\gamma\mu)^2} + \frac{2L\gamma^2(\mu+L)}{1+\gamma\mu}\Big)\tau^2 \mathbb{E}[\Psi_k] + (\gamma^2\mu+\eta^2 L)\tau\sigma^2 \\
+    &+ \Big( \frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu} \Big) \frac{\tau^3\sigma^2}{2}\Big] \\
+    &= \Big\{(1-\gamma\mu)^\tau + \frac{q}{M}\Big( \frac{4\gamma^2\mu(\mu + L)}{(1+\gamma\mu)^2} + \frac{2L\gamma^2(\mu+L)}{1+\gamma\mu}\Big)\tau^2\Big\} \mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L+\frac{\gamma^2\mu}{M})\tau\sigma^2\\
+     &+ \frac{q}{M}(\gamma^2\mu+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big(\frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\tau^3\sigma^2\\
+     &+ \gamma\mu L \tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|]
+\end{align*}
+The second inequality comes from Proposition \ref{proposition3.6}. Then, let's define $C(\gamma, \tau)$ as
+\begin{align*}
+    C(\gamma, \tau) &= (1-\gamma\mu)^\tau + \frac{q}{M}\Big( \frac{4\gamma^2\mu(\mu + L)}{(1+\gamma\mu)^2} + \frac{2L\gamma^2(\mu+L)}{1+\gamma\mu}\Big)\tau^2
+\end{align*}
+Finally, we obtain
+\begin{align*}
+    \mathbb{E}[\Psi_{k+1}] &\leq C(\gamma, \tau)\mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L+\frac{\gamma^2\mu}{M})\tau\sigma^2 + \frac{q}{M}(\gamma^2\mu+\eta^2 L)\tau\sigma^2 \\
+    &+ \frac{q}{2M}\Big(\frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\tau^3\sigma^2 + \gamma\mu L \tau \\
+    &\cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|]
+\end{align*}
+
+\subsubsection{Proof of Theorem \ref{theorem1}}
+\label{app:proof_theorem}
+
+\begin{theorem} \label{theorem1}
+    Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption1}, \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{1}{\gamma\mu}, \beta=\alpha+1, \gamma = \max(\eta, \sqrt{\frac{\eta}{\mu\tau}}), \eta, \gamma \in (0, \frac{1}{L}], \tau \geq 2, $ if the learning rate $\gamma$ satisfies
+    \begin{align} \label{condition1}
+        \Big(\mu^2 + \frac{q}{M}(\mu+L)(4\mu+2L)\Big)\gamma\tau \leq \frac{1}{2}\mu
+    \end{align}
+    FedAQ yields
+    \begin{align*}
+        &\mathbb{E}[\Psi_K] \leq \exp{\Big(-\frac{1}{2}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})K\tau\Big)} \Psi_0 + (2q+1)(\frac{\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{\eta\sigma^2}{M}) + 14\eta^2 L\tau\sigma^2 \\
+        &+ \frac{(780+\frac{2q}{M})\eta^{\frac{3}{2}}L\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}} + \frac{(\mu+L)(\mu^2+\mu L+L^2)q\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{5}{2}}M} + \frac{q\eta^3\tau^2(\mu+L)^2 L\sigma^2}{\mu M}
+    \end{align*}
+\end{theorem}
+
+\emph{Proof of Theorem \ref{theorem1} } At first, due to the condition (\ref{condition1}) in Theorem \ref{theorem1}, we get
+\begin{align*}
+    C(\gamma, \tau) &= (1-\gamma\mu)^\tau + \frac{q}{M}\Big( \frac{4\gamma^2\mu(\mu + L)}{(1+\gamma\mu)^2} + \frac{2L\gamma^2(\mu+L)}{1+\gamma\mu}\Big)\tau^2 \\
+    &\leq 1-\gamma\mu\tau+\gamma^2\mu^2\tau^2 + \frac{q}{M}\gamma^2(\mu+L)(4\mu+2L)\tau^2 \\
+    &= 1-\gamma\mu\tau + \Big(\mu^2+\frac{q}{M}(\mu+L)(4\mu+2L)\Big)\gamma^2\tau^2 \\
+    &\leq 1 - \frac{1}{2}\gamma\mu\tau \textrm{ }(\because \textrm{ condition } (\ref{condition1}))
+\end{align*}
+The first inequality comes from the fact that $(1-\gamma\mu)^\tau \leq e^{-\gamma\mu\tau} \leq 1-\gamma\mu\tau+\gamma^2\mu^2\tau^2$ when $0 \leq \gamma\mu \leq 1$.
+Also, it is trivial that $\gamma = \max(\eta, \sqrt{\frac{\eta}{\mu\tau}}) \in [\eta, \sqrt{\frac{\eta}{\mu}}]$. Thus, we can use Lemma \ref{lemma3.1}. By using Lemma \ref{lemma3.1} and the above result, we obtain
+\begin{align} \label{ineq3.7-1}
+    \mathbb{E}[\Psi_{k+1}] &\leq (1-\frac{1}{2}\gamma\mu\tau) \mathbb{E}[\Psi_k] + \frac{1}{2}(\eta^2 L+\frac{\gamma^2\mu}{M})\tau\sigma^2\nonumber\\
+     &+ \frac{q}{M}(\gamma^2\mu+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big(\frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\tau^3\sigma^2 + \gamma\mu L \tau \nonumber\\
+     &\cdot \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|]
+\end{align}
+By the Lemma B.3 in \cite{Yeojoon-yuan2020federated}, we know that the below quantity is bounded.
+\begin{gather*}
+    \max_{0\leq t <\tau} \mathbb{E}[\frac{1}{M} \sum_{m=1}^M \|\Bar{w}_{k, t}^{\textrm{md}} - w_{k, t}^{\textrm{md}, m}\|\|\frac{1}{1+\gamma\mu}(\Bar{w}_{k, t} - w_{k, t}^m) + \frac{\gamma\mu}{1+\gamma\mu}(\Bar{w}_{k, t}^{\textrm{ag}} - w_{k, t}^{\textrm{ag}, m})\|] \leq B \\
+    B=
+    \begin{cases}
+    7\eta\gamma\tau\sigma^2\Big(1+\frac{2\gamma^2\mu}{\eta}\Big)^{2\tau},~\textrm{ if } \gamma \in \Big(\eta, \sqrt{\frac{\eta}{\mu}}\Big]\\
+    7\eta^2\tau\sigma^2,~\textrm{ if } \gamma=\eta
+    \end{cases}
+\end{gather*}
+Telescoping (\ref{ineq3.7-1}) yields
+\begin{align*}
+    \mathbb{E}[\Psi_{K}] &\leq (1-\frac{1}{2}\gamma\mu\tau)^K\Psi_0 + \Big(\sum_{k^\prime=0}^{K-1}(1-\frac{1}{2}\gamma\mu\tau)^{k^\prime}\Big)\cdot \Big[\frac{1}{2}(\eta^2 L+\frac{\gamma^2\mu}{M})\tau\sigma^2+ \gamma\mu L \tau B\\
+     &+ \frac{q}{M}(\gamma^2\mu+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big(\frac{(\gamma-\eta)^2\gamma^2\mu^2(\mu+L)}{(1+\gamma\mu)^2} + \frac{\gamma^4(\mu+L)^2 L}{1+\gamma\mu}\Big)\tau^3\sigma^2 \Big] \\
+     &\leq \exp\Big(-\frac{\gamma\mu\tau K}{2}\Big)\Psi_0 + \frac{\eta^2 L\sigma^2}{\gamma\mu} + \frac{\gamma\sigma^2}{M} + 2LB + 2q\Big(\frac{\gamma\sigma^2}{M}+\frac{\eta^2 L\sigma^2}{\gamma\mu M}\Big) \\
+     &+ \frac{q}{M}\Big(\frac{(\gamma-\eta)^2 \gamma\mu(\mu+L)}{(1+\gamma\mu)^2}+\frac{\gamma^3(\mu+L)^2 L}{(1+\gamma\mu)\mu}\Big)\tau^2\sigma^2
+\end{align*}
+The last inequality comes from the fact that $\sum_{k^\prime=0}^{K-1}(1-\frac{1}{2}\gamma\mu\tau)^{k^\prime} \leq \frac{2}{\gamma\mu\tau}$. Since we plug in $\gamma = \max(\eta, \sqrt{\frac{\eta}{\mu\tau}})$, we can use Lemma B.4 in \cite{Yeojoon-yuan2020federated}. Therefore, we obtain
+\begin{align*}
+    \mathbb{E}[\Psi_K] &\leq \exp{\Big(-\frac{1}{2}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})K\tau\Big)} \Psi_0 + \frac{\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{\eta\sigma^2}{M} + \frac{780\eta^{\frac{3}{2}}L \tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}}+14\eta^2 L\tau\sigma^2 \\
+    &+ \max\Big(\frac{2q\eta^{\frac{1}{2}}\sigma^2}{M\mu^{\frac{1}{2}}\tau^{\frac{1}{2}}}, \frac{2q\eta\sigma^2}{M}\Big) + \min\Big(\frac{2q\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}L \sigma^2}{M\mu^{\frac{1}{2}}}, \frac{2q\eta L \sigma^2}{M\mu}\Big) \\
+    &+ \frac{q\tau^2\sigma^2}{M}\max\Big(\frac{\eta^{\frac{3}{2}}\mu(\mu+L)}{\mu^{\frac{3}{2}}\tau^{\frac{3}{2}}}+\frac{\eta^{\frac{3}{2}}(\mu+L)^2 L}{\mu^{\frac{5}{2}}\tau^{\frac{3}{2}}}, \frac{\eta^3 (\mu+L)^2 L}{\mu}\Big)
+\end{align*}
+The first term stems directly from Lemma B.4 in \cite{Yeojoon-yuan2020federated}. Also, the last term comes from the fact that
+\begin{align*}
+    \frac{(\gamma-\eta)^2 \gamma\mu(\mu+L)}{(1+\gamma\mu)^2}+\frac{\gamma^3(\mu+L)^2 L}{(1+\gamma\mu)\mu} \leq
+    \begin{cases}
+    \gamma^3\mu(\mu+L) + \frac{\gamma^3(\mu+L)^2 L}{\mu},~\textrm{ if }\gamma \neq \eta\\
+    \frac{\eta^3 (\mu+L)^2 L}{\mu},~\textrm{ if } \gamma=\eta
+    \end{cases}
+\end{align*}
+Therefore, by simple inequalities such as $\max(a, b) \leq a+b$ and $\min(a, b) \leq a$, we ultimately get
+\begin{align} \label{ineq_theorem1}
+    \mathbb{E}[\Psi_K] &\leq \exp{\Big(-\frac{1}{2}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})K\tau\Big)} \Psi_0 + \frac{(2q+1)\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{(2q+1)\eta\sigma^2}{M} + 14\eta^2 L\tau\sigma^2 \nonumber\\
+        &+ \frac{(780+\frac{2q}{M})\eta^{\frac{3}{2}}L\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}} + \frac{(\mu+L)(\mu^2+\mu L+L^2)q\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{5}{2}}M} + \frac{q\eta^3\tau^2(\mu+L)^2 L\sigma^2}{\mu M}
+\end{align}
+
+\subsubsection{Proof of Corollary \ref{corollary1}}
+\label{app:proof_corollary}
+
+\begin{corollary} \label{corollary1}
+    Let $C_1, C_2,\textrm{ and } \eta_0$ as below. Note that $T = K\tau$.
+    \begin{align*}
+        C_1 &= \frac{(\mu+L)(\mu^2+\mu L+L^2)q}{\mu^{\frac{5}{2}}}, \textrm{ } C_2 = \frac{q(\mu+L)^2 L}{\mu} \\
+        \eta_0 &= \frac{4\tau}{\mu T^2}\log^2\Big(e+\min(\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}, \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}, \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}) \Big)
+    \end{align*}
+    Then for $\eta = \min(\frac{1}{L}, \eta_0)$, FedAQ yields
+    \begin{align}
+        &\mathbb{E}[\Psi_K] \leq \min \Big( \exp(-\frac{\mu T}{2L}), \exp(-\frac{\mu^{\frac{1}{2}}T}{2 L^{\frac{1}{2}}\tau^{\frac{1}{2}}})\Big) \Psi_0 \nonumber \\
+        &+ \frac{7(2q+1)\sigma^2}{\mu MT} \log^2 \Big(e+\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}\Big) \\
+        &+ \frac{(6465+\frac{16q}{M})L\tau^2\sigma^2}{\mu^2 T^3}\log^4 \Big(e+ \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}\Big) \\
+        &+ \frac{9(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}{\mu^3 M T^3} \log^6 \Big(e + \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}\Big)
+    \end{align}
+\end{corollary}
+
+\emph{Proof of Corollary \ref{corollary1}} \textrm{ } Let's decompose the final result (\ref{ineq_theorem1}) of the Theorem \ref{theorem1} into a decreasing term and an increasing term. We denote the decreasing term $\psi_1$ and the increasing term $\psi_2$ as below.
+\begin{align*}
+    \psi_1(\eta) &= \exp\Big( -\frac{1}{2}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})T \Big)\Psi_0 \\
+    \psi_2(\eta) &= \frac{(2q+1)\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{(2q+1)\eta\sigma^2}{M} + \frac{(780+\frac{2q}{M})\eta^{\frac{3}{2}}L\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}} + 14\eta^2 L\tau\sigma^2 \\
+    &+ \frac{(\mu+L)(\mu^2+\mu L+L^2)q\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{5}{2}}M} + \frac{q\eta^3\tau^2(\mu+L)^2 L\sigma^2}{\mu M}
+\end{align*}
+Since $\psi_1$ is the decreasing term, we have
+\begin{align} \label{ineq_corollary1-1}
+    \psi_1(\eta) \leq \psi_1(\frac{1}{L}) + \psi_1(\eta_0)
+\end{align}
+where
+\begin{align*}
+    \psi_1(\frac{1}{L}) &= \min \Big( \exp(-\frac{\mu T}{2L}), \exp(-\frac{\mu^{\frac{1}{2}}T}{2 L^{\frac{1}{2}}\tau^{\frac{1}{2}}})\Big) \Psi_0 \\
+    \psi_1(\eta_0) &\leq \exp \Big( -\frac{1}{2} \sqrt{\frac{\eta_0 \mu}{\tau}}T\Big) \\
+    &= \Big(e+\min(\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}, \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}, \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}) \Big)^{-1} \Psi_0 \\
+    &\leq \frac{(2q+1)\sigma^2}{\mu MT} + \frac{L\tau^2\sigma^2}{\mu^2 T^3} + \frac{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}{\mu^3 M T^3}
+\end{align*}
+Since $\psi_2$ is the increasing term, we have
+\begin{align} \label{ineq_corollary1-2}
+    &\psi_2(\eta) \nonumber\\
+    &\leq \psi_2(\eta_0) \nonumber\\
+    &\leq \frac{2(2q+1)\sigma^2}{\mu MT}\log\Big(e+\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}\Big) + \frac{4(2q+1)\tau\sigma^2}{\mu MT^2} \log^2\Big(e+\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}\Big) \nonumber\\
+    &+ \frac{8(780+\frac{2q}{M})L\tau^2\sigma^2}{\mu^2 T^3} \log^3\Big(e+\frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}\Big) + \frac{224L\tau^3\sigma^2}{\mu^2 T^4}\log^4\Big(e+\frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}\Big) \nonumber\\
+    &+ \frac{8C_1 \tau^2\sigma^2}{\mu^{\frac{3}{2}}MT^3}\log^3\Big(e+\frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}\Big) + \frac{64C_2\tau^5\sigma^2}{\mu^3 MT^6} \log^6\Big(e+ \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}\Big) \nonumber\\
+    &\leq \frac{6(2q+1)\sigma^2}{\mu MT}\log^2\Big(e+\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}\Big) + \frac{(6464+\frac{16q}{M})L\tau^2\sigma^2}{\mu^2 T^3} \log^4\Big(e+\frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}\Big) \nonumber\\
+    &+ \frac{8(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}{\mu^3 M T^3} \log^6 \Big(e + \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}\Big)
+\end{align}
+The last inequality comes from $\frac{\tau}{T} \leq 1$. Therefore, by combining (\ref{ineq_corollary1-1}) and (\ref{ineq_corollary1-2}), we finally get
+\begin{align*}
+    \mathbb{E}[\Psi_K] &\leq \psi_1(\eta) + \psi_2(\eta) \\
+    &\leq \psi_1(\frac{1}{L}) + \psi_1(\eta_0) + \psi_2(\eta_0) \\
+    &\leq \min \Big( \exp(-\frac{\mu T}{2L}), \exp(-\frac{\mu^{\frac{1}{2}}T}{2 L^{\frac{1}{2}}\tau^{\frac{1}{2}}})\Big) \Psi_0 + \frac{7(2q+1)\sigma^2}{\mu MT} \log^2 \Big(e+\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}\Big) \\
+        &+ \frac{(6465+\frac{16q}{M})L\tau^2\sigma^2}{\mu^2 T^3}\log^4 \Big(e+ \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}\Big) \\
+        &+ \frac{9(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}{\mu^3 M T^3} \log^6 \Big(e + \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}\Big)
+\end{align*}
+
+\subsubsection{Why the Condition (\ref{condition1}) is Satisfied}
+\label{app:proof_condition2}
+
+The synchronization rounds $K$ required for linear speedup in $M$ for FedAQ is $\Tilde{\mathcal{O}}((\frac{M}{1+q})^{\frac{1}{2}})$ (See Remark \ref{remark5.4}). Since we derive this result from Theorem \ref{theorem1}, we should show that $K = \Tilde{\mathcal{O}}((\frac{M}{1+q})^{\frac{1}{2}})$ satisfies the condition (\ref{condition1}) in Theorem \ref{theorem1}.
+\begin{align*}
+     \Big(\mu^2 + \frac{q}{M}(\mu+L)(4\mu+2L)\Big)\gamma\tau \leq \frac{1}{2}\mu
+\end{align*}
+We rewrite the above condition as below.
+\begin{align} \label{theorem1_condition}
+    \gamma\tau \leq \frac{\mu}{2\mu^2+\frac{2q}{M}(\mu+L)(4\mu+2L)}
+\end{align}
+We know $\gamma = \max(\eta, \sqrt{\frac{\eta}{\mu\tau}})$ and $\eta = \min(\frac{1}{L}, \eta_0)$. Since $\eta_0$ becomes smaller and smaller as T increases, we assume $\eta = \eta_0$ here. Therefore, we get
+\begin{align*}
+    \gamma\tau &= \max(\eta_0\tau, \sqrt{\frac{\eta_0\tau}{\mu}}) \\
+    &= \max\Big(\frac{4\tau^2}{\mu T^2}\log^2\Big(e+\min(\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}, \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}, \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}) \Big), \\
+    &\frac{2\tau}{\mu T}\log\Big(e+\min(\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}, \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}, \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}) \Big)\Big)
+\end{align*}
+Note that $K=\frac{T}{\tau}=\Tilde{\mathcal{O}}((\frac{M}{1+q})^{\frac{1}{2}})=C(\frac{M}{1+q})^{\frac{1}{2}} \log(T)$ because $\Tilde{\mathcal{O}}$ contains hidden multiplicative polylog factors with respect to $T$. We can assume $T$ is sufficiently large here. Then, we have
+\begin{align*}
+    \gamma\tau &= \max\Big(\frac{4(1+q)}{\mu C^2M\log^2(T)}\log^2\Big(e+\min(\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}, \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}, \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}) \Big), \\
+    &\frac{2(1+q)^{\frac{1}{2}}}{\mu CM^{\frac{1}{2}}\log(T)}\log\Big(e+\min(\frac{\mu M T \Psi_0}{(2q+1)\sigma^2}, \frac{\mu^2 T^3\Psi_0}{L\tau^2\sigma^2}, \frac{\mu^3 M T^3\Psi_0}{(\mu^{\frac{3}{2}}C_1+8C_2)\tau^2\sigma^2}) \Big)\Big) \\
+    &\leq \max\Big(\frac{4(1+q)}{\mu C^2M\log^2(T)}\log^2\Big(\frac{2\mu M T \Psi_0}{(2q+1)\sigma^2}\Big), \frac{2(1+q)^{\frac{1}{2}}}{\mu CM^{\frac{1}{2}}\log(T)}\log\Big(\frac{2\mu M T \Psi_0}{(2q+1)\sigma^2} \Big)\Big)
+\end{align*}
+For an arbitrary constant $k_1 > 0$, it is easy to show that $\lim_{T \rightarrow \infty} \frac{\log(k_1 T)}{\log(T)} = 1$. Thus, we obtain
+\begin{align*}
+    \gamma\tau &\leq \max\Big(\frac{4(1+q)}{\mu C^2M\log^2(T)}\log^2\Big(\frac{2\mu M T \Psi_0}{(2q+1)\sigma^2}\Big), \frac{2(1+q)^{\frac{1}{2}}}{\mu CM^{\frac{1}{2}}\log(T)}\log\Big(\frac{2\mu M T \Psi_0}{(2q+1)\sigma^2} \Big)\Big) \\
+    &\simeq \max\Big(\frac{4(1+q)}{\mu C^2M}, \frac{2(1+q)^{\frac{1}{2}}}{\mu CM^{\frac{1}{2}}}\Big) \\
+    &\leq \frac{\mu}{2\mu^2+\frac{2q}{M}(\mu+L)(4\mu+2L)}
+\end{align*}
+Finally, we conclude that there exists a constant $C$ that meets the last inequality. Therefore, $K = \Tilde{\mathcal{O}}((\frac{M}{1+q})^{\frac{1}{2}})$ satisfies the condition (\ref{condition1}).
+
+\subsection{Proof Details for FedAQ under Condition Set (\ref{parameter2_FedAQ})}
+\label{app:proofs2}
+
+We use notations defined in \cref{app:proofs} here as well. We newly define $\Phi_{k, t}^m, \Phi_{k, t}, \Phi_k, B_{k, t}^m$ as below.
+\begin{align*}
+    \Phi_{k, t}^m &= F(w_{k, t}^{\textrm{ag}, m}) - F^* + \frac{1}{6} \mu \|w_{k, t}^m - w^*\|^2\\
+    \Phi_{k, t} &= F(\Bar{w}_{k, t}^{\textrm{ag}}) -F^* + \frac{1}{6} \mu \|\Bar{w}_{k, t} - w^*\|^2 \\
+    \Phi_k :&= \Phi_{k, 0} = F(w_k^{\textrm{ag}}) - F^* + \frac{1}{6} \mu \|w_k - w^*\|^2 \\
+    B_{k, t}^m &= \Big( \frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2 + \gamma^2(\frac{\mu}{3} + L)\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L \Phi_{k, t}^m
+    %\chi_{k, t}^m &= \frac{\mu}{2}\|w_{k, t}^m - w_k\|^2 + \frac{L}{2} \|w_{k, t}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2
+\end{align*}
+
+The flow of proof is similar to \cref{app:proofs}. We need one more condition $\gamma\mu \leq \frac{3}{4}$ to show the convergence of FedAQ under the parameter condition set (\ref{parameter2_FedAQ}).
+
+\subsubsection{Proof of Lemma \ref{lemmaD.1}}
+\label{app:proof_lemma2}
+
+% \begin{lemma} \label{lemmaD.1}
+%  Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption1}, \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{3}{2\gamma\mu} - \frac{1}{2}, \beta=\frac{2\alpha^2-1}{\alpha-1}, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta, \gamma \in (0, \frac{1}{L}], \gamma\mu \leq \frac{3}{4},\tau \geq 2, $ FedAQ yields
+%  \begin{align*}
+%      &\mathbb{E}[\Phi_{k+1}] \\
+%      &\leq D(\gamma, \tau) \mathbb{E}[\Phi_k] + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} + \gamma\tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}})- \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\\
+%      &+ \underbrace{\frac{q}{M}(\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big( (\gamma-\eta)^2 \gamma^2\mu^2 (\frac{\mu}{3} + \frac{L}{4}) + \gamma^4 (\frac{\mu}{3} + L)^2 L \Big)\tau^3\sigma^2}_{\textrm{additional terms due to quantization}}
+%  \end{align*}
+%  Where $D(\gamma, \tau)$ is defined as
+%  \begin{align*}
+%      D(\gamma, \tau) &= (1-\frac{1}{3}\gamma\mu)^\tau + \underbrace{\frac{q}{M}\Big( \gamma^2\mu(\frac{8}{3}\mu + 2L) + 2\gamma^2 L(\frac{\mu}{3} + L)\Big)\tau^2}_{\textrm{additional terms due to quantization}}
+%  \end{align*}
+% \end{lemma}
+
+In order to prove Lemma \ref{lemmaD.1}, we first introduce five crucial Propositions for proving Lemma \ref{lemmaD.1}. Then, we prove Lemma \ref{lemmaD.1} by using Propositions in the last part of this section.
+\begin{proposition} \label{propositionD.2}
+Let Assumption \ref{assumption1} hold and consider any $k$ synchronization round. Then, we can decompose the expectation as follows:
+\begin{align*}
+    \mathbb{E}[\|w_{k+1} - w^*\|^2] &= \mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau}\|^2] + \mathbb{E}[\|\Bar{w}_{k, \tau} - w^*\|^2] \\
+    \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - F^*] &= \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - F(\Bar{w}_{k, \tau}^{\textrm{ag}})] + \mathbb{E}[F(\Bar{w}_{k, \tau}^{\textrm{ag}}) - F^*]
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{propositionD.2}} \textrm{ } The second equality is trivial. The first equality is the same as one in Proposition \ref{proposition3.2}.
+
+\begin{proposition} \label{propositionD.3}
+Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{3}{2\gamma\mu} - \frac{1}{2}, \beta=\frac{2\alpha^2-1}{\alpha-1}, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta \in (0, \frac{1}{L}]$, FedAQ yields
+\begin{align*}
+    \mathbb{E}[\Phi_{k, \tau}] &\leq (1-\frac{1}{3}\gamma\mu)^\tau \mathbb{E}[\Phi_k] + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} \\
+    &+ \gamma\tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2]
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{propositionD.3}} \textrm{ } We refer to the proof of Lemma C.2 in \cite{Yeojoon-yuan2020federated}. There is no quantization between $\Phi_{k, \tau}$ and $\Phi_k$. Thus, we can directly apply useful inequalities in the proof of Lemma C.2 in \cite{Yeojoon-yuan2020federated} to our proof. Then, we obtain
+\begin{align*}
+    \mathbb{E}[\Phi_{k, t+1}|\mathcal{F}_{k, t}] &\leq (1-\frac{1}{3}\gamma\mu) \Phi_{k, t} + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\sigma^2}{M} + \gamma\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2
+\end{align*}
+From the above relationship between $\Phi_{k, t+1}$ and $\Phi_{k, t}$, we get
+\begin{align*}
+    \mathbb{E}[\Phi_{k, \tau}] &\leq (1-\frac{1}{3}\gamma\mu)^\tau \mathbb{E}[\Phi_k] + \Big(\sum_{t=0}^{\tau-1} (1-\frac{1}{3}\gamma\mu)^t \Big)\cdot(\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\sigma^2}{M} \\
+    &+ \gamma \sum_{t=0}^{\tau-1} \Big\{ (1-\frac{1}{3}\gamma\mu)^{\tau-t-1} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\Big\} \\
+    &\leq (1-\frac{1}{3}\gamma\mu)^\tau \mathbb{E}[\Phi_k] + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} \\
+    &+ \gamma\tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2]
+\end{align*}
+
+\begin{proposition} \label{propositionD.4}
+Let Assumption \ref{assumption1} hold. Then, we have
+\begin{align*}
+    \mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau}\|^2] &\leq \frac{q}{M^2}\sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] \\
+    \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - F(\Bar{w}_{k, \tau}^{\textrm{ag}})] &\leq \frac{qL}{2M^2} \sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2]
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{propositionD.4}} \textrm{ } The first inequality is the same as one in Proposition \ref{proposition3.4}.
+The proof of the second inequality is similar to Proposition \ref{proposition3.4} as well.
+\begin{align*}
+    \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - F(\Bar{w}_{k, \tau}^{\textrm{ag}})] &= \mathbb{E}[F(w_k^{\textrm{ag}} + \frac{1}{M}\sum_{m=1}^M Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})) - F(\frac{1}{M}\sum_{m=1}^M w_{k, \tau}^{\textrm{ag}, m})] \\
+    &\leq \mathbb{E}\Big[ \langle \nabla F(\frac{1}{M} \sum_{m=1}^M w_{k, \tau}^{\textrm{ag}, m}), \frac{1}{M} \sum_{m=1}^M \Big( Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}) \\
+    &- (w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})\Big) \rangle + \frac{L}{2} \|\frac{1}{M} \sum_{m=1}^M  Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}) - (w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})\|^2\Big] \\
+    &= \frac{L}{2} \mathbb{E}[\|\frac{1}{M} \sum_{m=1}^M  Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}) - (w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})\|^2] \\
+    &= \frac{L}{2M^2}\sum_{m=1}^M \mathbb{E}[\| Q(w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}) - (w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}})\|^2] \\
+    &\leq \frac{qL}{2M^2} \sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2]
+\end{align*}
+
+\begin{proposition} \label{propositionD.5}
+Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{3}{2\gamma\mu} - \frac{1}{2}, \beta=\frac{2\alpha^2-1}{\alpha-1}, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta, \gamma \in (0, \frac{1}{L}], \gamma\mu \leq \frac{3}{4},$ we get
+\begin{align*}
+    \mathbb{E}[B_{k, t}^m] &\leq \mathbb{E}[B_{k, 0}^m] + \bigg( \Big(\frac{\mu}{3} (\frac{2\alpha-1}{2\alpha^2 -1})^2 + L(\frac{\alpha-1}{2\alpha^2 -1})^2 \Big)\cdot(\gamma - \eta)^2+ \gamma^4 (\frac{\mu}{3} + L)^2 \frac{2\alpha^2 - \alpha}{2\alpha^2 - 1}L \bigg) \\
+    &\cdot \frac{1 + \frac{1}{2}\alpha^{-1}}{\frac{1}{4}\alpha^{-2}} \cdot \Big( 1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t\Big)\sigma^2
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{propositionD.5}}
+\textrm{ } From the notation mentioned in the beginning of \cref{app:proofs2},
+\begin{align} \label{eqD.5-1}
+    \mathbb{E}[B_{k, t+1}^m|\mathcal{F}_{k, t}] &= \Big( \frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\mathbb{E}[\|w_{k, t+1}^m - w_{k, t+1}^{\textrm{ag}, m}\|^2|\mathcal{F}_{k, t}] \nonumber\\
+    &+ \gamma^2(\frac{\mu}{3} + L)\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L\mathbb{E}[\Phi_{k, t+1}^m|\mathcal{F}_{k, t}]
+\end{align}
+Thus, let's sequentially compute $\mathbb{E}[\|w_{k, t+1}^m - w_{k, t+1}^{\textrm{ag}, m}\|^2|\mathcal{F}_{k, t}]$ and $\mathbb{E}[\Phi_{k, t+1}^m|\mathcal{F}_{k, t}]$.
+\begin{align*}
+    \mathbb{E}[\|w_{k, t+1}^m - w_{k, t+1}^{\textrm{ag}, m}\|^2|\mathcal{F}_{k, t}] &= \mathbb{E}[\|(1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - \gamma g_{k, t}^m - w_{k, t}^{\textrm{md}, m} + \eta g_{k, t}^m\|^2|\mathcal{F}_{k, t}] \\
+    &= \mathbb{E}[\|(1-\alpha^{-1})(w_{k, t}^m - w_{k, t}^{\textrm{md}, m}) - (\gamma-\eta)g_{k, t}^m\|^2|\mathcal{F}_{k, t}] \textrm{ } (\leftarrow \gamma \geq \eta) \\
+    &= \|(1-\alpha^{-1})(w_{k, t}^m - w_{k, t}^{\textrm{md}, m}) - (\gamma-\eta)\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 \\
+    &+ (\gamma - \eta)^2\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m}) - g_{k, t}^m\|^2|\mathcal{F}_{k, t}] \\
+    &\leq (1-\alpha^{-1})^2 \|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2 + (\gamma-\eta)^2 \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 \\
+    &+ (\gamma-\eta)^2 \sigma^2 - 2(\gamma-\eta) \langle (1-\alpha^{-1})(w_{k, t}^m - w_{k, t}^{\textrm{md}, m}), \nabla F(w_{k, t}^{\textrm{md}, m})\rangle \\
+    &\leq (1-\alpha^{-1})^2(1+2\alpha^{-1}) \|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2 \\
+    &+ (\gamma-\eta)^2(1+\frac{\alpha}{2}) \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + (\gamma-\eta)^2 \sigma^2
+\end{align*}
+Here, we need to bound $\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2$.
+\begin{align} \label{ineqD.5-2}
+    \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 &\leq 2L(F(w_{k, t}^{\textrm{md}, m}) - F^*) \textrm{ }(\because \textrm{ Assumption \ref{assumption3}}) \nonumber\\
+    &\leq 2L\Big(\beta^{-1}(F(w_{k, t}^m)-F(w^*))+(1-\beta^{-1})(F(w_{k, t}^{\textrm{ag}, m})-F^*)\Big) \nonumber\\
+    &\leq \beta^{-1}L^2 \|w_{k, t}^m - w^*\|^2 + 2(1-\beta^{-1})L(F(w_{k, t}^{\textrm{ag}, m})-F^*) \nonumber\\
+    &= \frac{\alpha-1}{2\alpha^2-1} L^2 \|w_{k, t}^m - w^*\|^2 + 2L\cdot\frac{2\alpha^2-\alpha}{2\alpha^2-1}(F(w_{k, t}^{\textrm{ag}, m})-F^*) \nonumber\\
+    &\leq \frac{\frac{\mu}{3}(2\alpha^2-\alpha)}{2\alpha^2-1} L \|w_{k, t}^m - w^*\|^2 + 2L\cdot\frac{2\alpha^2-\alpha}{2\alpha^2-1}(F(w_{k, t}^{\textrm{ag}, m})-F^*) \nonumber\\
+    &= \frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L \Phi_{k, t}^m
+\end{align}
+It is easy to show $(\alpha-1)L \leq \frac{\mu}{3}(2\alpha^2-\alpha)$ by using the fact $\gamma L \leq 1$. Therefore, we finally get
+\begin{align} \label{ineqD.5-3}
+    &\mathbb{E}[\|w_{k, t+1}^m - w_{k, t+1}^{\textrm{ag}, m}\|^2|\mathcal{F}_{k, t}] \nonumber\\
+    &\leq (1-\alpha^{-1})^2(1+2\alpha^{-1}) \|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2 + (\gamma-\eta)^2(1+\frac{\alpha}{2}) \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + (\gamma-\eta)^2 \sigma^2 \nonumber\\
+    &\leq (1-\alpha^{-1})^2(1+2\alpha^{-1}) \|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2 + (\gamma-\eta)^2(1+\frac{\alpha}{2}) (\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L \Phi_{k, t}^m) \nonumber\\
+    &+ (\gamma-\eta)^2 \sigma^2
+\end{align}
+Now, let's compute $\mathbb{E}[\Phi_{k, t+1}^m|\mathcal{F}_{k, t}]$. We need to compute $\mathbb{E}[\|w_{k, t+1}^m-w^*\|^2|\mathcal{F}_{k, t}]$ and $\mathbb{E}[F(w_{k, t+1}^{\textrm{ag}, m}) - F^*|\mathcal{F}_{k, t}]$ first.
+\begin{align*}
+    &\mathbb{E}[\|w_{k, t+1}^m-w^*\|^2|\mathcal{F}_{k, t}] \\
+    &= \mathbb{E}[\|(1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - \gamma g_{k, t}^m -w^*\|^2|\mathcal{F}_{k, t}] \\
+    &\leq \|(1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - \gamma\nabla F(w_{k, t}^{\textrm{md}, m}) -w^*\|^2 +\gamma^2\sigma^2 \\
+    &\leq (1+\frac{1}{2}\alpha^{-1})\|(1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - \gamma\nabla F(w_{k, t}^{\textrm{md}, m}) -w^*\|^2 +\gamma^2\sigma^2 \\
+    &= (1+\frac{1}{2}\alpha^{-1})\|(1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - w^*\|^2 + \gamma^2(1+\frac{1}{2}\alpha^{-1}) \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 \\
+    &- 2\gamma(1+\frac{1}{2}\alpha^{-1}) \langle (1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - w^*, \nabla F(w_{k, t}^{\textrm{md}, m})\rangle + \gamma^2\sigma^2 \\
+    &\leq (1+\frac{1}{2}\alpha^{-1})\Big((1-\alpha^{-1})\|w_{k, t}^m - w^*\|^2 + \alpha^{-1}\|w_{k, t}^{\textrm{md}, m} - w^*\|^2\Big) + \gamma^2(1+\frac{1}{2}\alpha^{-1}) \\
+    &\cdot \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2  - 2\gamma(1+\frac{1}{2}\alpha^{-1}) \langle (1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - w^*, \nabla F(w_{k, t}^{\textrm{md}, m})\rangle + \gamma^2\sigma^2
+\end{align*}
+It is easy to show $(1+\frac{1}{2}\alpha^{-1})(1-\alpha^{-1}) < 1-\frac{1}{2}\alpha^{-1}, 1+\frac{1}{2}\alpha^{-1} \leq \frac{3}{2}$. Due to these facts, we obtain
+\begin{align*}
+    &\mathbb{E}[\|w_{k, t+1}^m-w^*\|^2|\mathcal{F}_{k, t}] \\
+    &\leq (1-\frac{1}{2}\alpha^{-1})\|w_{k, t}^m - w^*\|^2 + \frac{3}{2}\alpha^{-1}\|w_{k, t}^{\textrm{md}, m} - w^*\|^2 + \frac{3}{2}\gamma^2 \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 \\
+    &- 2\gamma(1+\frac{1}{2}\alpha^{-1}) \langle (1-\alpha^{-1})w_{k, t}^m + \alpha^{-1}w_{k, t}^{\textrm{md}, m} - w^*, \nabla F(w_{k, t}^{\textrm{md}, m})\rangle + \gamma^2\sigma^2 \\
+    &\leq (1-\frac{1}{2}\alpha^{-1})\|w_{k, t}^m - w^*\|^2 + \frac{3}{2}\alpha^{-1}\|w_{k, t}^{\textrm{md}, m} - w^*\|^2 + \frac{3}{2}\gamma^2 \|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 \\
+    &- 2\gamma(1+\frac{1}{2}\alpha^{-1}) \langle (1-\alpha^{-1}(1-\beta^{-1}))w_{k, t}^m + \alpha^{-1}(1-\beta^{-1})w_{k, t}^{\textrm{ag}, m} - w^*, \nabla F(w_{k, t}^{\textrm{md}, m})\rangle + \gamma^2\sigma^2
+\end{align*}
+Next, we compute the upper bound of $\mathbb{E}[F(w_{k, t+1}^{\textrm{ag}, m}) - F^*|\mathcal{F}_{k, t}]$.
+\begin{align*}
+    &\mathbb{E}[F(w_{k, t+1}^{\textrm{ag}, m}) - F^*|\mathcal{F}_{k, t}] \\
+    &\leq \mathbb{E}[F(w_{k, t}^{\textrm{md}, m}) + \langle \nabla F(w_{k, t}^{\textrm{md}, m}), w_{k, t+1}^{\textrm{ag}, m} - w_{k, t}^{\textrm{md}, m} \rangle + \frac{L}{2}\|w_{k, t+1}^{\textrm{ag}, m} - w_{k, t}^{\textrm{md}, m}\|^2 - F^*|\mathcal{F}_{k, t}] \\
+    &\leq F(w_{k, t}^{\textrm{md}, m}) -F^* - \eta\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \\
+    &\leq F(w_{k, t}^{\textrm{md}, m}) -F^* - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \textrm{ }(\because 1-\frac{\eta L}{2} \geq \frac{1}{2} \leftarrow \eta \in [0, \frac{1}{L}]) \\
+    &= (1-\frac{1}{2}\alpha^{-1})(F(w_{k, t}^{\textrm{ag}, m})-F^*) + \frac{1}{2}\alpha^{-1}(F(w_{k, t}^{\textrm{md}, m}) -F^*) \\
+    &+ (1-\frac{1}{2}\alpha^{-1})(F(w_{k, t}^{\textrm{md}, m}) - F(w_{k, t}^{\textrm{ag}, m})) - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \\
+    &\leq (1-\frac{1}{2}\alpha^{-1})(F(w_{k, t}^{\textrm{ag}, m})-F^*) - \frac{\mu\alpha^{-1}}{4}\|w_{k, t}^{\textrm{md}, m}-w^*\|^2 + \frac{1}{2}\alpha^{-1} \langle \nabla F(w_{k, t}^{\textrm{md}, m}), w_{k, t}^{\textrm{md}, m}-w^*\rangle \\
+    &+ (1-\frac{1}{2}\alpha^{-1})\langle \nabla F(w_{k, t}^{\textrm{md}, m}), w_{k, t}^{\textrm{md}, m} - w_{k, t}^{\textrm{ag}, m}\rangle - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \\
+    &= (1-\frac{1}{2}\alpha^{-1})(F(w_{k, t}^{\textrm{ag}, m})-F^*) - \frac{\mu\alpha^{-1}}{4}\|w_{k, t}^{\textrm{md}, m}-w^*\|^2 - \frac{\eta}{2}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{\eta^2 L}{2}\sigma^2 \\
+    &+ \frac{1}{2}\alpha^{-1} \langle \nabla F(w_{k, t}^{\textrm{md}, m}), 2\alpha\beta^{-1}w_{k, t}^m + (1 - 2\alpha\beta^{-1})w_{k, t}^{\textrm{ag}, m} - w^*\rangle
+\end{align*}
+It is easy to show $\frac{1}{2}\alpha^{-1} = \frac{\gamma\mu}{3}(1+\frac{1}{2}\alpha^{-1})$. Then, we bound $\mathbb{E}[\Phi_{k, t+1}^m|\mathcal{F}_{k, t}]$ by using the above results.
+\begin{align} \label{ineqD.5-4}
+    \mathbb{E}[\Phi_{k, t+1}^m|\mathcal{F}_{k, t}] &= \frac{\mu}{6}\mathbb{E}[\|w_{k, t+1}^m-w^*\|^2|\mathcal{F}_{k, t}] + \mathbb{E}[F(w_{k, t+1}^{\textrm{ag}, m}) - F^*|\mathcal{F}_{k, t}] \nonumber\\
+    &\leq (1-\frac{1}{2}\alpha^{-1})\Phi_{k, t}^m - \frac{2\eta - \gamma^2\mu}{4}\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2 + \frac{1}{2}(\frac{\gamma^2\mu}{3}+\eta^2 L)\sigma^2 \nonumber\\
+    &\leq (1-\frac{1}{2}\alpha^{-1})\Phi_{k, t}^m  + \frac{1}{2}(\frac{\gamma^2\mu}{3}+\eta^2 L)\sigma^2 \textrm{ }(\because \gamma \leq \sqrt{\frac{\eta}{\mu}}) \nonumber\\
+    &\leq (1-\frac{1}{2}\alpha^{-1})\Phi_{k, t}^m  + \frac{\gamma^2}{2}(\frac{\mu}{3}+L)\sigma^2
+\end{align}
+Plugging (\ref{ineqD.5-3}), (\ref{ineqD.5-4}) in (\ref{eqD.5-1}) yields,
+\begin{align} \label{ineqD.5-5}
+    &\mathbb{E}[B_{k, t+1}^m|\mathcal{F}_{k, t}] \nonumber\\
+    &\leq  \Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\Big((1-\alpha^{-1})^2(1+2\alpha^{-1}) \|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2 \nonumber\\
+    &+ (\gamma-\eta)^2(1+\frac{\alpha}{2}) \cdot (\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L \Phi_{k, t}^m) + (\gamma-\eta)^2 \sigma^2 \Big) \nonumber\\
+    &+ \gamma^2(\frac{\mu}{3} + L)\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L\Big((1-\frac{1}{2}\alpha^{-1})\Phi_{k, t}^m  + \frac{\gamma^2}{2}(\frac{\mu}{3}+L)\sigma^2\Big) \nonumber\\
+    &= (1-\alpha^{-1})^2(1+2\alpha^{-1})\Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big) \|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2 \nonumber\\
+    &+ \bigg(\Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)(\gamma-\eta)^2(1+\frac{\alpha}{2}) + (1-\frac{1}{2}\alpha^{-1})\gamma^2(\frac{\mu}{3}+L)\bigg) \nonumber\\
+    &\cdot(\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L \Phi_{k, t}^m) + \bigg(\Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)(\gamma-\eta)^2+\gamma^4(\frac{\mu}{3}+L)^2\frac{2\alpha^2-\alpha}{2\alpha^2-1}L\bigg)\sigma^2
+\end{align}
+We can show that both coefficients of $\|w_{k, t}^m - w_{k, t}^{\textrm{md}, m}\|^2$ and $\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L \Phi_{k, t}^m$ are upper bounded by $1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}}$.
+\begin{align} \label{ineqD.5-6}
+    &(1-\alpha^{-1})^2(1+2\alpha^{-1}) \leq 1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}} \textrm{}(<1) \\
+    \Leftrightarrow \textrm{} &1-\frac{1}{4}\alpha^{-2}+\frac{1}{2}\alpha^{-1} - (1-\alpha^{-1})^2(1+2\alpha^{-1})(1+\frac{1}{2}\alpha^{-1}) \geq 0 \nonumber
+\end{align}
+Let's define $g_1(\alpha^{-1}) = 1-\frac{1}{4}\alpha^{-2}+\frac{1}{2}\alpha^{-1} - (1-\alpha^{-1})^2(1+2\alpha^{-1})(1+\frac{1}{2}\alpha^{-1})$. Then, it is easy to check that $g_1(\alpha^{-1}) \geq 0$ for $0 < \alpha^{-1} \leq 1$. Moreover, we would like to show the below inequality.
+\begin{align} \label{ineqD.5-7}
+    &\Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)(\gamma-\eta)^2(1+\frac{\alpha}{2}) + (1-\frac{1}{2}\alpha^{-1})\gamma^2(\frac{\mu}{3}+L) \nonumber \\
+    \leq \textrm{ } &\Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\gamma^2(1+\frac{\alpha}{2}) + (1-\frac{1}{2}\alpha^{-1})\gamma^2(\frac{\mu}{3}+L) \nonumber\\
+    \leq \textrm{ } &(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})\gamma^2(\frac{\mu}{3}+L)
+\end{align}
+Since $\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2} = \frac{\mu}{3}(\frac{2\alpha-1}{2\alpha^2-1})^2 + L(\frac{\alpha-1}{2\alpha^2-1})^2 \leq (\frac{\mu}{3}+\frac{L}{4})(\frac{2\alpha-1}{2\alpha^2-1})^2$, it is enough to show
+\begin{align*}
+    (\frac{\mu}{3}+\frac{L}{4})(\frac{2\alpha-1}{2\alpha^2-1})^2\gamma^2 (1+\frac{\alpha}{2}) \leq \frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}} \gamma^2 (\frac{\mu}{3}+L)
+\end{align*}
+We also know that $\frac{\frac{\mu}{3}+L}{\frac{\mu}{3}+\frac{L}{4}}=4-\frac{1}{\frac{1}{3}+\frac{L}{\mu}\cdot\frac{1}{4}} > \frac{16}{7} \textrm{ }(\because \frac{L}{\mu}>1)$. Then, we only need to show
+\begin{align*}
+    &(\frac{2\alpha-1}{2\alpha^2-1})^2(1+\frac{\alpha}{2}) \leq \frac{16}{7}\cdot\frac{\frac{1}{2}}{\alpha+\frac{1}{2}} \\
+    \Leftrightarrow \textrm{ } &\frac{8}{7}(2\alpha^2 -1)^2 - (2\alpha-1)^2(1+\frac{\alpha}{2})(\alpha+\frac{1}{2}) \geq 0
+\end{align*}
+Let's define $g_2(\alpha) = \frac{8}{7}(2\alpha^2 -1)^2 - (2\alpha-1)^2(1+\frac{\alpha}{2})(\alpha+\frac{1}{2})$. Then, it is easy to check $g_2(\alpha) \geq 0$ for $\alpha \geq \frac{3}{2}$. As we assume $\gamma\mu \leq \frac{3}{4}$, we can say $\alpha = \frac{3}{2\gamma\mu}-\frac{1}{2} \geq \frac{3}{2}$. This indicates that the inequality (\ref{ineqD.5-7}) is satisfied. Thus, from (\ref{ineqD.5-5}), (\ref{ineqD.5-6}), and (\ref{ineqD.5-7}) we finally get
+\begin{align*}
+    \mathbb{E}[B_{k, t+1}^m|\mathcal{F}_{k, t}] &\leq (1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})B_{k, t}^m \\
+    &+ \bigg(\Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)(\gamma-\eta)^2+\gamma^4(\frac{\mu}{3}+L)^2\frac{2\alpha^2-\alpha}{2\alpha^2-1}L\bigg)\sigma^2
+\end{align*}
+From this relationship between $B_{k, t+1}^m$ and $B_{k, t}^m$, we obtain the result of Proposition \ref{propositionD.5}.
+\begin{align*}
+    \mathbb{E}[B_{k, t}^m] &\leq (1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t\mathbb{E}[B_{k, 0}^m] + \bigg(\Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)(\gamma-\eta)^2 \\
+    &+\gamma^4(\frac{\mu}{3}+L)^2\frac{2\alpha^2-\alpha}{2\alpha^2-1}L\bigg)\sigma^2 \cdot \frac{1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t}{1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})} \\
+    &\leq \mathbb{E}[B_{k, 0}^m] + \bigg( \Big(\frac{\mu}{3} (\frac{2\alpha-1}{2\alpha^2 -1})^2 + L(\frac{\alpha-1}{2\alpha^2 -1})^2 \Big)\cdot(\gamma - \eta)^2+ \gamma^4 (\frac{\mu}{3} + L)^2 \frac{2\alpha^2 - \alpha}{2\alpha^2 - 1}L \bigg) \\
+    &\cdot \frac{1 + \frac{1}{2}\alpha^{-1}}{\frac{1}{4}\alpha^{-2}} \cdot \Big( 1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t\Big)\sigma^2
+\end{align*}
+
+\begin{proposition} \label{propositionD.6}
+Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{3}{2\gamma\mu} - \frac{1}{2}, \beta=\frac{2\alpha^2-1}{\alpha-1}, \gamma \in [\eta, \sqrt{\frac{\eta}{\mu}}], \eta, \gamma \in (0, \frac{1}{L}], \gamma\mu \leq \frac{3}{4},\tau \geq 2,$ FedAQ yields
+\begin{align*}
+    \frac{\mu}{6}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] &\leq \Big( \gamma^2\mu(\frac{8}{3}\mu + 2L) + 2\gamma^2L(\frac{\mu}{3}+L)\Big)\tau^2 \mathbb{E}[\Phi_k] \\
+    &+ (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 \\
+    &+ \Big( (\gamma-\eta)^2\gamma^2\mu^2(\frac{\mu}{3}+\frac{L}{4})+\gamma^4(\frac{\mu}{3}+L)^2 L \Big) \frac{\tau^3\sigma^2}{2}
+\end{align*}
+\end{proposition}
+
+\emph{Proof of Proposition \ref{propositionD.6}} \textrm{ } We use the same upper bounds for $\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2]$ and $\mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2]$ as in Proposition \ref{proposition3.6}.
+\begin{align*}
+    \mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] &\leq \tau \Big(\sum_{t=0}^{\tau-1} 2\alpha^{-2}(1-\beta^{-1})^2\mathbb{E}[\|w_{k, t}^m- w_{k, t}^{\textrm{ag}, m}\|^2 ] + 2\gamma^2\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\Big) \\
+    &+2\tau\gamma^2\sigma^2 \\
+    \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] &\leq \tau \Big(\sum_{t=0}^{\tau-1} 2\beta^{-2}\mathbb{E}[\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2] + 2\eta^2\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\Big) +2\tau\eta^2\sigma^2
+\end{align*}
+Thus, by using the above results, we get
+\begin{align*}
+    &\frac{\mu}{6}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] \\
+    &\leq \tau \sum_{t=0}^{\tau-1} \Big\{ \Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\mathbb{E}[\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2] + (\frac{\gamma^2\mu}{3} + \eta^2 L)\mathbb{E}[\|\nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\Big\} \\
+    &+ (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 \\
+    &\leq \tau \sum_{t=0}^{\tau-1} \Big\{ \Big(\frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\mathbb{E}[\|w_{k, t}^m - w_{k, t}^{\textrm{ag}, m}\|^2] + \gamma^2(\frac{\mu}{3}+L)\frac{2\alpha^2-\alpha}{2\alpha^2-1}2L\mathbb{E}[\Phi_{k, t}^m]\Big\} \\
+    &+ (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 \textrm{ }(\because (\ref{ineqD.5-2})) \\
+    &= \tau \Big( \sum_{t=0}^{\tau-1} \mathbb{E}[B_{k, t}^m]\Big) + (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2
+\end{align*}
+By Proposition \ref{propositionD.5} and the fact $\Phi_{k, 0}^m = \Phi_k$, we obtain
+\begin{align*}
+    &\frac{\mu}{6}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] \\
+    &\leq \tau \Big\{ \sum_{t=0}^{\tau-1} \mathbb{E}[B_{k, 0}^m] + \bigg( \Big(\frac{\mu}{3} (\frac{2\alpha-1}{2\alpha^2 -1})^2 + L(\frac{\alpha-1}{2\alpha^2 -1})^2 \Big)(\gamma - \eta)^2 + \gamma^4 (\frac{\mu}{3} + L)^2 \frac{2\alpha^2 - \alpha}{2\alpha^2 - 1}L \bigg) \\
+    &\frac{1 + \frac{1}{2}\alpha^{-1}}{\frac{1}{4}\alpha^{-2}} \Big( 1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t\Big)\sigma^2\Big\} + (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 \\
+    &= \tau^2 \bigg(\Big( \frac{\mu\alpha^{-2}}{3}(1-\beta^{-1})^2 + L\beta^{-2}\Big)\mathbb{E}[\|w_k-w_k^{\textrm{ag}}\|^2] + \gamma^2(\frac{\mu}{3} + L)\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L\mathbb{E}[\Phi_{k}]\bigg) \\
+    &+ \tau \bigg( \Big(\frac{\mu}{3} (\frac{2\alpha-1}{2\alpha^2 -1})^2 + L(\frac{\alpha-1}{2\alpha^2 -1})^2 \Big) \cdot (\gamma - \eta)^2 + \gamma^4 (\frac{\mu}{3} + L)^2 \frac{2\alpha^2 - \alpha}{2\alpha^2 - 1}L \bigg) \frac{1 + \frac{1}{2}\alpha^{-1}}{\frac{1}{4}\alpha^{-2}} \\
+    &\cdot \Big(\sum_{t=0}^{\tau-1} 1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t\Big)\sigma^2 + (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2
+\end{align*}
+Before we get to the final result, let's find the upper bound for $\|w_k - w_k^{\textrm{ag}}\|^2$, $\sum_{t=0}^{\tau-1}\Big( 1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t\Big)$
+\begin{align*}
+    \|w_k - w_k^{\textrm{ag}}\|^2 &= \|w_k - w^* -(w_k^{\textrm{ag}}-w^*)\|^2 \nonumber\\
+    &\leq (1+\frac{1}{3})\|w_k - w^*\|^2 + (1+3)\|w_k^{
+    \textrm{ag}}-w^*\|^2 \nonumber\\
+    &\leq \frac{4}{3}\|w_k - w^*\|^2 + 4\cdot \frac{2}{\mu}\Big(F(w_k^{\textrm{ag}})-F^*-\langle\nabla F(w^*),w_k^{\textrm{ag}}-w^*\rangle\Big) \nonumber\\
+    &= \frac{4}{3}\|w_k-w^*\|^2 + \frac{8}{\mu}(F(w_k^{\textrm{ag}})-F^*) = \frac{8}{\mu}\Phi_k
+\end{align*}
+\begin{align*}
+    \sum_{t=0}^{\tau-1}\Big( 1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t\Big) &= \tau - \sum_{t=0}^{\tau-1} (1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^t \\
+    &= \tau - \frac{1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})^\tau}{1-(1-\frac{1}{2}\alpha^{-1}+\frac{\frac{1}{2}\alpha^{-1}}{1+\frac{1}{2}\alpha^{-1}})} \\
+    &\leq \tau - \frac{1-(1-\frac{\frac{1}{4}\alpha^{-2}}{1+\frac{1}{2}\alpha^{-1}}\tau + (\frac{\frac{1}{4}\alpha^{-2}}{1+\frac{1}{2}\alpha^{-1}})^2\frac{\tau(\tau-1)}{2})}{\frac{\frac{1}{4}\alpha^{-2}}{1+\frac{1}{2}\alpha^{-1}}} \\
+    &= \frac{\frac{1}{4}\alpha^{-2}}{1+\frac{1}{2}\alpha^{-1}}\cdot\frac{\tau(\tau-1)}{2} \leq \frac{\frac{1}{4}\alpha^{-2}}{1+\frac{1}{2}\alpha^{-1}}\cdot\frac{\tau^2}{2}
+\end{align*}
+Therefore, we obtain
+\begin{align} \label{ineqD.6-1}
+    &\frac{\mu}{6}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] \nonumber\\
+    &\leq \Big(\frac{8}{3}\alpha^{-2}(1-\beta^{-1})^2 +\frac{8L}{\mu}\beta^{-2} + \gamma^2(\frac{\mu}{3} + L)\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L\Big)\tau^2 \mathbb{E}[\Phi_k] + (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2\nonumber\\
+    &+ \bigg( \Big(\frac{\mu}{3} (\frac{2\alpha-1}{2\alpha^2 -1})^2 + L(\frac{\alpha-1}{2\alpha^2 -1})^2 \Big)\cdot (\gamma - \eta)^2 + \gamma^4 (\frac{\mu}{3} + L)^2 \frac{2\alpha^2 - \alpha}{2\alpha^2 - 1}L \bigg) \cdot\frac{\tau^3\sigma^2}{2}
+\end{align}
+Moreover, we can simplify the above inequality by replacing $\alpha, \beta$ with $\gamma, \mu$. It is easy to show $\frac{2\alpha^2-\alpha}{2\alpha^2-1} \leq 1, \frac{2\alpha-1}{2\alpha^2-1} \leq \frac{1}{\alpha} = \frac{2\gamma\mu}{3-\gamma\mu} \leq \gamma\mu$. Then, we can further show
+\begin{align} \label{ineqD.6-2}
+    &\frac{8}{3}\alpha^{-2}(1-\beta^{-1})^2 +\frac{8L}{\mu}\beta^{-2} + \gamma^2(\frac{\mu}{3} + L)\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L \nonumber\\
+    = &\frac{8}{3}(\frac{2\alpha-1}{2\alpha^2-1})^2 +\frac{8L}{\mu}(\frac{\alpha-1}{2\alpha^2-1})^2 + \gamma^2(\frac{\mu}{3} + L)\frac{2\alpha^2-\alpha}{2\alpha^2-1}\cdot 2L \nonumber\\
+    \leq &(\frac{8}{3} + \frac{2L}{\mu})(\frac{2\alpha-1}{2\alpha^2-1})^2 + \gamma^2(\frac{\mu}{3} + L)2L \nonumber\\
+    \leq &(\frac{8}{3} + \frac{2L}{\mu})\alpha^{-2} + \gamma^2(\frac{\mu}{3} + L)2L \nonumber\\
+    \leq &\gamma^2\mu(\frac{8}{3}\mu + 2L) + 2\gamma^2 L(\frac{\mu}{3}+L)
+\end{align}
+We also get
+\begin{align} \label{ineqD.6-3}
+    &\Big(\frac{\mu}{3} (\frac{2\alpha-1}{2\alpha^2 -1})^2 + L(\frac{\alpha-1}{2\alpha^2 -1})^2 \Big)\cdot (\gamma - \eta)^2 + \gamma^4 (\frac{\mu}{3} + L)^2 \frac{2\alpha^2 - \alpha}{2\alpha^2 - 1}L \nonumber\\
+    \leq &(\frac{\mu}{3}+\frac{L}{4})(\frac{2\alpha-1}{2\alpha^2 -1})^2 (\gamma - \eta)^2 + \gamma^4 (\frac{\mu}{3} + L)^2 L \nonumber\\
+    \leq &(\gamma - \eta)^2\gamma^2\mu^2(\frac{\mu}{3}+\frac{L}{4}) + \gamma^4 (\frac{\mu}{3} + L)^2 L
+\end{align}
+Finally, from (\ref{ineqD.6-1}), (\ref{ineqD.6-2}), and (\ref{ineqD.6-3}), we conclude as below
+\begin{align*}
+    \frac{\mu}{6}\mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{L}{2} \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] &\leq \Big( \gamma^2\mu(\frac{8}{3}\mu + 2L) + 2\gamma^2L(\frac{\mu}{3}+L)\Big)\tau^2 \mathbb{E}[\Phi_k] \\
+    &+ (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 \\
+    &+ \Big( (\gamma-\eta)^2\gamma^2\mu^2(\frac{\mu}{3}+\frac{L}{4})+\gamma^4(\frac{\mu}{3}+L)^2 L \Big) \frac{\tau^3\sigma^2}{2}
+\end{align*}
+
+\emph{Proof of Lemma \ref{lemmaD.1}} \textrm{ } By the definition of $\Phi_k, \Phi_{k, t}$ and Proposition \ref{propositionD.2},
+\begin{gather*}
+    \mathbb{E}[\Phi_{k+1}] = \mathbb{E}[\Phi_{k, \tau}] + \frac{\mu}{6}\mathbb{E}[\|w_{k+1} - \Bar{w}_{k, \tau}\|^2] + \mathbb{E}[F(w_{k+1}^{\textrm{ag}}) - F(\Bar{w}_{k, \tau}^{\textrm{ag}})]
+\end{gather*}
+Applying Proposition \ref{propositionD.3} and Proposition \ref{propositionD.4}, we have
+\begin{align*}
+    &\mathbb{E}[\Phi_{k+1}] \\
+    &\leq (1-\frac{1}{3}\gamma\mu)^\tau \mathbb{E}[\Phi_k] + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} + \gamma\tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2] \\
+    &+ \frac{q\mu}{6M^2}\sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^m - w_k\|^2] + \frac{qL}{2M^2} \sum_{m=1}^M \mathbb{E}[\|w_{k, \tau}^{\textrm{ag}, m} - w_k^{\textrm{ag}}\|^2] \\
+    &\leq (1-\frac{1}{3}\gamma\mu)^\tau \mathbb{E}[\Phi_k] + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} + \gamma\tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2] \\
+    &+ \frac{q}{M}\Big[ \Big( \gamma^2\mu(\frac{8}{3}\mu + 2L) + 2\gamma^2L(\frac{\mu}{3}+L)\Big)\tau^2 \mathbb{E}[\Phi_k] + (\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 \\
+    &+ \Big( (\gamma-\eta)^2\gamma^2\mu^2(\frac{\mu}{3}+\frac{L}{4})+\gamma^4(\frac{\mu}{3}+L)^2 L \Big) \frac{\tau^3\sigma^2}{2}\Big] \\
+    &= D(\gamma, \tau) \mathbb{E}[\Phi_k] + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} + \gamma\tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2]\\
+    &+ \frac{q}{M}(\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big( (\gamma-\eta)^2 \gamma^2\mu^2 (\frac{\mu}{3} + \frac{L}{4}) + \gamma^4 (\frac{\mu}{3} + L)^2 L \Big)\tau^3\sigma^2
+\end{align*}
+The second inequality comes from Proposition \ref{propositionD.6}. $D(\gamma, \tau)$ is defined as below.
+\begin{align*}
+    D(\gamma, \tau) &= (1-\frac{1}{3}\gamma\mu)^\tau + \frac{q}{M}\Big( \gamma^2\mu(\frac{8}{3}\mu + 2L) + 2\gamma^2 L(\frac{\mu}{3} + L)\Big)\tau^2
+\end{align*}
+
+\subsubsection{Proof of Theorem \ref{theorem2}}
+\label{app:proof_theorem2}
+
+% \begin{theorem} \label{theorem2}
+%     Let F be $\mu$-strongly convex, and assume Assumption \ref{assumption1}, \ref{assumption2}, \ref{assumption3}, \ref{assumption4}, then for $\alpha=\frac{3}{2\gamma\mu} - \frac{1}{2}, \beta=\frac{2\alpha^2-1}{\alpha-1}, \gamma = \max(\eta, \sqrt{\frac{\eta}{\mu\tau}}), \eta, \gamma \in (0, \frac{1}{L}], \gamma\mu \leq \frac{3}{4}, \tau \geq 2, $ if the learning rate $\gamma$ satisfies
+%     \begin{align} \label{condition2}
+%         \bigg( \frac{1}{9}\mu^2 +\frac{q}{M}\Big( \mu(\frac{8}{3}\mu +2L) + 2L(\frac{\mu}{3}+L)\Big)\bigg)\gamma\tau \leq \frac{1}{6}\mu
+%     \end{align}
+%     FedAQ yields
+%     \begin{align*}
+%         \mathbb{E}[\Phi_K] &\leq \exp{\Big(-\frac{1}{6}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})K\tau\Big)} \Phi_0 + \frac{2(2q+1)\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{8(q+25)\eta^2 L^2\tau\sigma^2}{\mu} \\
+%         &+ \frac{3q\Big(\mu^2(\frac{\mu}{3}+\frac{L}{4}) + L(\frac{\mu}{3}+L)^2\Big)\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{5}{2}}M} + \frac{3qL(\frac{\mu}{3}+L)^2 \eta^3\tau^2\sigma^2}{\mu M}
+%     \end{align*}
+% \end{theorem}
+
+\emph{Proof of Theorem \ref{theorem2} } At first, due to the condition (\ref{condition2}) in Theorem \ref{theorem2}, we get
+\begin{align*}
+    D(\gamma, \tau) &= (1-\frac{1}{3}\gamma\mu)^\tau + \frac{q}{M}\Big( \gamma^2\mu(\frac{8}{3}\mu + 2L) + 2\gamma^2 L(\frac{\mu}{3} + L)\Big)\tau^2 \\
+    &\leq 1-\frac{1}{3}\gamma\mu\tau + \frac{1}{9}\gamma^2\mu^2\tau^2 + \frac{q}{M}\gamma^2\Big(\mu(\frac{8}{3}\mu+2L)+2L(\frac{\mu}{3}+L)\Big)\tau^2 \\
+    &= 1-\frac{1}{3}\gamma\mu\tau + \bigg( \frac{1}{9}\mu^2 +\frac{q}{M}\Big( \mu(\frac{8}{3}\mu +2L) + 2L(\frac{\mu}{3}+L)\Big)\bigg)\gamma^2\tau^2 \\
+    &\leq 1 - \frac{1}{6}\gamma\mu\tau \textrm{ }(\because \textrm{ condition } (\ref{condition2}))
+\end{align*}
+It is trivial that $\gamma = \max(\eta, \sqrt{\frac{\eta}{\mu\tau}}) \in [\eta, \sqrt{\frac{\eta}{\mu}}]$. Thus, we can use Lemma \ref{lemmaD.1}. By using Lemma \ref{lemmaD.1} and the above result, we obtain
+\begin{align} \label{ineqD.7-1}
+    &\mathbb{E}[\Phi_{k+1}] \nonumber\\
+    &\leq (1-\frac{1}{6}\gamma\mu\tau) \mathbb{E}[\Phi_k] + (\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} + \gamma\tau \cdot \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2] \nonumber\\
+    &+ \frac{q}{M}(\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 + \frac{q}{2M}\Big( (\gamma-\eta)^2 \gamma^2\mu^2 (\frac{\mu}{3} + \frac{L}{4}) + \gamma^4 (\frac{\mu}{3} + L)^2 L \Big)\tau^3\sigma^2
+\end{align}
+By the Lemma C.14 in \cite{Yeojoon-yuan2020federated}, we know that the below quantity is bounded.
+\begin{gather*}
+    \max_{0\leq t <\tau} \mathbb{E}[\|\nabla F(\Bar{w}_{k, t}^{\textrm{md}}) - \frac{1}{M} \sum_{m=1}^M \nabla F(w_{k, t}^{\textrm{md}, m})\|^2] \leq B^\prime \\
+    B^\prime=
+    \begin{cases}
+    4\eta^2 L^2\tau\sigma^2\Big(1+\frac{\gamma^2\mu}{\eta}\Big)^{2\tau},~\textrm{ if } \gamma \in \Big(\eta, \sqrt{\frac{\eta}{\mu}}\Big]\\
+    4\eta^2 L^2\tau\sigma^2,~\textrm{ if } \gamma=\eta
+    \end{cases}
+\end{gather*}
+Telescoping (\ref{ineqD.7-1}) yields
+\begin{align*}
+    \mathbb{E}[\Phi_{K}] &\leq (1-\frac{1}{6}\gamma\mu\tau)^K\Phi_0 + \Big(\sum_{k^\prime=0}^{K-1}(1-\frac{1}{6}\gamma\mu\tau)^{k^\prime}\Big)\cdot \Big[(\frac{\eta^2 L}{2} + \frac{\gamma^2\mu}{6})\frac{\tau\sigma^2}{M} + \frac{q}{M}(\frac{\gamma^2\mu}{3}+\eta^2 L)\tau\sigma^2 \nonumber\\
+     &+ \frac{q}{2M}\Big( (\gamma-\eta)^2 \gamma^2\mu^2 (\frac{\mu}{3} + \frac{L}{4}) + \gamma^4 (\frac{\mu}{3} + L)^2 L \Big)\tau^3\sigma^2 +\gamma\tau B^\prime \Big] \\
+     &\leq \exp\Big(-\frac{\gamma\mu\tau K}{6}\Big)\Phi_0 + \frac{3\eta^2 L\sigma^2}{\gamma\mu M} + \frac{\gamma\sigma^2}{M} + \frac{6B^\prime}{\mu} + 2q\Big(\frac{\gamma\sigma^2}{M}+\frac{3\eta^2 L\sigma^2}{\gamma\mu M}\Big) \\
+     &+ \frac{3q}{M}\Big( (\gamma-\eta)^2 \gamma\mu (\frac{\mu}{3} + \frac{L}{4}) + \frac{\gamma^3 (\frac{\mu}{3} + L)^2 L}{\mu} \Big)\tau^2\sigma^2
+\end{align*}
+The last inequality comes from the fact that $\sum_{k^\prime=0}^{K-1}(1-\frac{1}{6}\gamma\mu\tau)^{k^\prime} \leq \frac{6}{\gamma\mu\tau}$. Since we plug in $\gamma = \max(\eta, \sqrt{\frac{\eta}{\mu\tau}})$, we can use Lemma C.15 in \cite{Yeojoon-yuan2020federated}. Therefore, we obtain
+\begin{align*}
+    \mathbb{E}[\Phi_K] &\leq \exp{\Big(-\frac{1}{6}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})K\tau\Big)} \Phi_0 + \frac{2(2q+1)\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{4(2q+1)\eta^2 L^2\tau\sigma^2}{\mu} \\
+    &+ \frac{24e^2\eta^2 L^2\tau\sigma^2}{\mu} + \frac{3q\tau^2\sigma^2}{M}\max\Big(\frac{\eta^{\frac{3}{2}}\mu(\frac{\mu}{3}+\frac{L}{4})}{\mu^{\frac{3}{2}}\tau^{\frac{3}{2}}}+\frac{\eta^{\frac{3}{2}}(\frac{\mu}{3}+L)^2 L}{\mu^{\frac{5}{2}}\tau^{\frac{3}{2}}}, \frac{\eta^3 (\frac{\mu}{3}+L)^2 L}{\mu}\Big)
+\end{align*}
+The first term stems directly from Lemma C.15 in \cite{Yeojoon-yuan2020federated}. Also, the last term comes from the fact that
+\begin{align*}
+    (\gamma-\eta)^2 \gamma\mu (\frac{\mu}{3} + \frac{L}{4}) + \frac{\gamma^3 (\frac{\mu}{3} + L)^2 L}{\mu} \leq
+    \begin{cases}
+    \gamma^3\mu(\frac{\mu}{3}+\frac{L}{4}) + \frac{\gamma^3(\frac{\mu}{3}+L)^2 L}{\mu},~\textrm{ if }\gamma \neq \eta\\
+    \frac{\eta^3 (\frac{\mu}{3}+L)^2 L}{\mu},~\textrm{ if } \gamma=\eta
+    \end{cases}
+\end{align*}
+Therefore, by simple inequalities such as $\max(a, b) \leq a+b$ and $\min(a, b) \leq a$, we ultimately get
+\begin{align} \label{ineq_theorem2}
+    \mathbb{E}[\Phi_K] &\leq \exp{\Big(-\frac{1}{6}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})K\tau\Big)} \Phi_0 + \frac{2(2q+1)\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{8(q+25)\eta^2 L^2\tau\sigma^2}{\mu} \nonumber\\
+        &+ \frac{3q\Big(\mu^2(\frac{\mu}{3}+\frac{L}{4}) + L(\frac{\mu}{3}+L)^2\Big)\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{5}{2}}M} + \frac{3qL(\frac{\mu}{3}+L)^2 \eta^3\tau^2\sigma^2}{\mu M}
+\end{align}
+
+\subsubsection{Proof of Corollary \ref{corollary2}}
+\label{app:proof_corollary2}
+
+\begin{corollary} \label{corollary2}
+    Let $D_1, D_2,\textrm{ and } \eta_0$ as below. Note that $T = K\tau$.
+    \begin{align*}
+        D_1 &= \frac{\Big( \mu^2(\frac{\mu}{3}+\frac{L}{4}) + L(\frac{\mu}{3}+L)^2) \Big)q}{\mu^{\frac{5}{2}}}, \textrm{ } D_2 = \frac{q(\frac{\mu}{3}+L)^2 L}{\mu} \\
+        \eta_0 &= \frac{36\tau}{\mu T^2}\log^2\Big(e+\min(\frac{\mu M T \Phi_0}{(2q+1)\sigma^2}, \frac{\mu^3 T^4\Phi_0}{(q+25)L^2\tau^3\sigma^2}, \frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+6^3 D_2)\tau^2\sigma^2}) \Big)
+    \end{align*}
+    Then for $\eta = \min(\frac{1}{L}, \eta_0)$, FedAQ yields
+    \begin{align}
+        \mathbb{E}[\Phi_K] &\leq \min \Big( \exp(-\frac{\mu T}{6L}), \exp(-\frac{\mu^{\frac{1}{2}}T}{6 L^{\frac{1}{2}}\tau^{\frac{1}{2}}})\Big) \Phi_0 \nonumber\\
+        &+ \frac{13(2q+1)\sigma^2}{\mu MT} \log^2 \Big(e+\frac{\mu M T \Phi_0}{(2q+1)\sigma^2}\Big) \\
+        &+ \frac{10369(q+25)L^2\tau^3\sigma^2}{\mu^3 T^4}\log^4 \Big(e+ \frac{\mu^3 T^4\Phi_0}{(q+25)L^2\tau^3\sigma^2}\Big) \\
+        &+ \frac{649(\mu^{\frac{3}{2}}D_1+216D_2)\tau^2\sigma^2}{\mu^3 M T^3} \log^6 \Big(e + \frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+216 D_2)\tau^2\sigma^2}\Big)
+    \end{align}
+\end{corollary}
+
+\emph{Proof of Corollary \ref{corollary2}} \textrm{ } Let's decompose the final result (\ref{ineq_theorem2}) of the Theorem \ref{theorem2} into a decreasing term and an increasing term. We denote the decreasing term $\phi_1$ and the increasing term $\phi_2$ as below.
+\begin{align*}
+    \phi_1(\eta) &= \exp\Big( -\frac{1}{6}\max(\eta\mu, \sqrt{\frac{\eta\mu}{\tau}})T \Big)\Phi_0 \\
+    \phi_2(\eta) &= \frac{2(2q+1)\eta^{\frac{1}{2}}\sigma^2}{\mu^{\frac{1}{2}}M\tau^{\frac{1}{2}}} + \frac{8(q+25)\eta^2 L^2\tau\sigma^2}{\mu} + \frac{3q\Big(\mu^2(\frac{\mu}{3}+\frac{L}{4}) + L(\frac{\mu}{3}+L)^2\Big)\eta^{\frac{3}{2}}\tau^{\frac{1}{2}}\sigma^2}{\mu^{\frac{5}{2}}M} \\
+    &+ \frac{3qL(\frac{\mu}{3}+L)^2 \eta^3\tau^2\sigma^2}{\mu M}
+\end{align*}
+Since $\phi_1$ is the decreasing term, we have
+\begin{align} \label{ineq_corollary2-1}
+    \phi_1(\eta) \leq \phi_1(\frac{1}{L}) + \phi_1(\eta_0)
+\end{align}
+where
+\begin{align*}
+    \phi_1(\frac{1}{L}) &= \min \Big( \exp(-\frac{\mu T}{6L}), \exp(-\frac{\mu^{\frac{1}{2}}T}{6 L^{\frac{1}{2}}\tau^{\frac{1}{2}}})\Big) \Phi_0 \\
+    \phi_1(\eta_0) &\leq \exp \Big( -\frac{1}{6} \sqrt{\frac{\eta_0 \mu}{\tau}}T\Big) \\
+    &= \Big(e+\min(\frac{\mu M T \Phi_0}{(2q+1)\sigma^2}, \frac{\mu^3 T^4\Phi_0}{(q+25)L^2\tau^3\sigma^2}, \frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+6^3 D_2)\tau^2\sigma^2}) \Big)^{-1} \Phi_0 \\
+    &\leq \frac{(2q+1)\sigma^2}{\mu MT} + \frac{(q+25)L^2\tau^3\sigma^2}{\mu^3 T^4} + \frac{(\mu^{\frac{3}{2}}D_1+6^3 D_2)\tau^2\sigma^2}{\mu^3 M T^3}
+\end{align*}
+Since $\phi_2$ is the increasing term, we have
+\begin{align} \label{ineq_corollary2-2}
+    &\phi_2(\eta) \nonumber\\
+    &\leq \phi_2(\eta_0) \nonumber\\
+    &\leq \frac{12(2q+1)\sigma^2}{\mu MT}\log\Big(e+\frac{\mu M T \Phi_0}{(2q+1)\sigma^2}\Big) + \frac{8\cdot36^2(q+25)L^2\tau^3\sigma^2}{\mu^3 T^4}\log^4 \Big(e+ \frac{\mu^3 T^4\Phi_0}{(q+25)L^2\tau^3\sigma^2}\Big)\nonumber\\
+    &+ \frac{3\cdot6^3 D_1 \tau^2\sigma^2}{\mu^{\frac{3}{2}}MT^3}\log^3\Big(e+\frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+6^3 D_2)\tau^2\sigma^2}\Big) \nonumber\\
+    &+ \frac{3\cdot36^3 D_2\tau^5\sigma^2}{\mu^3 MT^6} \log^6\Big(e+ \frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+6^3 D_2)\tau^2\sigma^2}\Big) \nonumber\\
+    &\leq \frac{12(2q+1)\sigma^2}{\mu MT}\log\Big(e+\frac{\mu M T \Phi_0}{(2q+1)\sigma^2}\Big) + \frac{8\cdot36^2(q+25)L^2\tau^3\sigma^2}{\mu^3 T^4}\log^4 \Big(e+ \frac{\mu^3 T^4\Phi_0}{(q+25)L^2\tau^3\sigma^2}\Big) \nonumber\\
+    &+ \frac{3\cdot6^3 (\mu^{\frac{3}{2}}D_1+6^3 D_2)\tau^2\sigma^2}{\mu^3 M T^3} \log^6 \Big(e + \frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+6^3  D_2)\tau^2\sigma^2}\Big)
+\end{align}
+The last inequality comes from $\frac{\tau}{T} \leq 1$. Therefore, by combining (\ref{ineq_corollary2-1}) and (\ref{ineq_corollary2-2}), we finally get
+\begin{align*}
+    \mathbb{E}[\Phi_K] &\leq \phi_1(\eta) + \phi_2(\eta) \\
+    &\leq \phi_1(\frac{1}{L}) + \phi_1(\eta_0) + \phi_2(\eta_0) \\
+    &\leq \min \Big( \exp(-\frac{\mu T}{6L}), \exp(-\frac{\mu^{\frac{1}{2}}T}{6 L^{\frac{1}{2}}\tau^{\frac{1}{2}}})\Big) \Phi_0 + \frac{13(2q+1)\sigma^2}{\mu MT} \log^2 \Big(e+\frac{\mu M T \Phi_0}{(2q+1)\sigma^2}\Big) \\
+        &+ \frac{10369(q+25)L^2\tau^3\sigma^2}{\mu^3 T^4}\log^4 \Big(e+ \frac{\mu^3 T^4\Phi_0}{(q+25)L^2\tau^3\sigma^2}\Big) \\
+        &+ \frac{649(\mu^{\frac{3}{2}}D_1+216D_2)\tau^2\sigma^2}{\mu^3 M T^3} \log^6 \Big(e + \frac{\mu^3 M T^3\Phi_0}{(\mu^{\frac{3}{2}}D_1+216 D_2)\tau^2\sigma^2}\Big)
+\end{align*}
+
+\subsection{More Theoretical Details about Remark \ref{remark5.5} and Contribution \ref{contribution2} in Introduction}%\cite{Yeojoon-haddadpour2021federated}
+\label{app:fedcomgate}
+
+\subsubsection{Why Haddadpour et al. (2021) Cannot Achieve a Linear Speedup}
+It is hard to say that \cite{Yeojoon-haddadpour2021federated} achieves a linear speedup in $M$ in strongly-convex and homogeneous settings. Let's first recap Corollary D.8 in \cite{Yeojoon-haddadpour2021federated}. They let $\eta\gamma\mu\tau \leq \frac{1}{2}, \kappa = \frac{L}{\mu}, \gamma \geq M$ and tune $\eta$ as $\eta = \frac{1}{2L(\frac{q}{M}+1)\tau\gamma}$. Here, $\eta$ is the client learning rate, and $\gamma$ is the server learning rate. Other parameters are the same as we defined. Then, they obtain the below result.
+\begin{align} \label{app:C1-rate1}
+    \mathbb{E}[F(w_K)- F^*] &\leq \exp(-\eta\gamma\mu\tau K)(F(w_0) - F^*) + \frac{1}{\mu}\Big[\frac{1}{2}\tau L^2\eta^2\sigma^2 + (1+q)\frac{\gamma\eta L\sigma^2}{2M}\Big] \\
+    &\leq \mathcal{O} \Big(\exp(-\frac{K}{2(\frac{q}{M}+1)\kappa})(F(w_0) - F^*) + \frac{\sigma^2}{\gamma^2\mu\tau} + \frac{(q+1)\sigma^2}{\mu(\frac{q}{M}+1)\tau M} \Big) \nonumber \\
+    &= \mathcal{O} \Big(\exp(-\frac{K}{2(\frac{q}{M}+1)\kappa})(F(w_0) - F^*) + \frac{\sigma^2 K}{\gamma^2\mu T} + \frac{(q+1)K \sigma^2}{\mu(\frac{q}{M}+1)T M} \Big) \nonumber
+\end{align}
+Let's focus on the second and third term. We assume $M$ is large enough and represent them only with $\gamma, K, T, M$ to easily check the linear speedup of this convergence rate. Then, we obtain
+\begin{align} \label{app:C1-rate2}
+    \mathcal{O}\Big( \frac{K}{\gamma^2 T} + \frac{K}{MT}\Big) \leq \mathcal{O}\Big( \frac{K}{M^2 T} + \frac{K}{MT}\Big) \textrm{ }(\because \gamma \geq M)
+\end{align}
+Thus, it seemingly achieves a linear speedup in $M$ when $K$ is just a constant. However, we are missing the critical point in this analysis. To be specific, let's consider the case when $\gamma = 1$. Then, the convergence rate (\ref{app:C1-rate2}) changes into $\mathcal{O}\Big( \frac{K}{T} + \frac{K}{MT}\Big)$ that cannot achieve a linear speedup in $M$. This is implausible because the convergence rate (\ref{app:C1-rate1}) becomes tighter when $\gamma = 1$ than $\gamma \geq M$ (See the last term of (\ref{app:C1-rate1})). Actually, we can achieve a linear speedup in $M$ when $\gamma = 1$ if we tune $\eta = \frac{1}{2L(\frac{q}{M}+1)\tau M}$. However, this is not an appropriate tuning because there is $M$ in the denominator. Similarly, \cite{Yeojoon-haddadpour2021federated} tunes $\eta = \frac{1}{2L(\frac{q}{M}+1)\tau\gamma}$ where $\gamma \geq M$. Even though there is no $M$ in the denominator, the condition $\gamma \geq M$ forcibly makes the convergence rate achieve a linear speedup without any theoretical benefits of the algorithm. Therefore, we cannot say their $\eta$ makes their algorithm achieve a linear speedup in $M$. We should tune in a different way that does not contain $M$ in a denominator. For reference, our tuning parameter $\eta$ for the FedAQ algorithm does not contain $M$ in the denominator (See Corollary \ref{corollary1} and Corollary \ref{corollary2}).
+
+\subsubsection{New Convergence Rate for Haddadpour et al. (2021)}
+
+We propose new $\eta$ and convergence rate for \cite{Yeojoon-haddadpour2021federated}. This new $\eta$ makes the algorithm achieve a linear speedup in $M$. Let's denote $\Phi_0 = F(w_0) - F^*$. We also know that $T = K\tau$. Then, we choose $\eta$ as
+\begin{align*}
+    \eta = \frac{1}{\gamma\mu T}\log \Big( e+ \min (\frac{\gamma^2\mu^3 T^2 \Phi_0}{\tau L^2\sigma^2}, \frac{\mu^2 MT\Phi_0}{(1+q)L\sigma^2})\Big)
+\end{align*}
+We plug in this $\eta$ to (\ref{app:C1-rate1}). We bound the first term as below.
+\begin{align*}
+    \exp(-\eta\gamma\mu\tau K)(F(w_0) - F^*) &= \Big( e+ \min (\frac{\gamma^2\mu^3 T^2 \Phi_0}{\tau L^2\sigma^2}, \frac{\mu^2 MT\Phi_0}{(1+q)L\sigma^2})\Big)^{-1} \Phi_0 \\
+    &\leq \frac{\tau L^2\sigma^2}{\gamma^2\mu^3 T^2} + \frac{(1+q)L\sigma^2}{\mu^2 MT}
+\end{align*}
+The another terms are bounded as below.
+\begin{align*}
+    \frac{1}{\mu}\Big[\frac{1}{2}\tau L^2\eta^2\sigma^2 + (1+q)\frac{\gamma\eta L\sigma^2}{2M}\Big] &\leq \frac{\tau L^2\sigma^2}{2\gamma^2\mu^3 T^2} \log^2 \Big( e+\frac{\gamma^2\mu^3 T^2\Phi_0}{\tau L^2\sigma^2}\Big) \\
+    &+ \frac{(1+q)L\sigma^2}{2\mu^2 MT}\log\Big( e+ \frac{\mu^2 MT\Phi_0}{(1+q)L\sigma^2}\Big)
+\end{align*}
+Thus, we obtain a new convergence rate by combining the above two bounds.
+\begin{align*}
+    \mathbb{E}[F(w_K)- F^*] &\leq \exp(-\eta\gamma\mu\tau K)(F(w_0) - F^*) + \frac{1}{\mu}\Big[\frac{1}{2}\tau L^2\eta^2\sigma^2 + (1+q)\frac{\gamma\eta L\sigma^2}{2M}\Big] \\
+    &\leq \frac{3\tau L^2\sigma^2}{2\gamma^2\mu^3 T^2} \log^2 \Big( e+\frac{\gamma^2\mu^3 T^2\Phi_0}{\tau L^2\sigma^2}\Big) + \frac{3(1+q)L\sigma^2}{2\mu^2 MT}\log\Big( e+ \frac{\mu^2 MT\Phi_0}{(1+q)L\sigma^2}\Big)
+\end{align*}
+Here, we replace $\tau$ with $\frac{T}{K}$. Then, we represent the above convergence rate with only $T, K, M, q$.
+\begin{gather*}
+    \Tilde{\mathcal{O}}(\frac{1}{TK} + \frac{1+q}{MT})
+\end{gather*}
+This is the new convergence rate we propose in Remark \ref{remark5.5}. We also get $K = \Tilde{\mathcal{O}}(\frac{M}{1+q})$ communication rounds make this algorithm achieve a linear speedup in $M$.
+
+\subsubsection{More Details on Contribution \ref{contribution2} in Introduction} \label{app:quantization_noise}
+
+\paragraph{More Details on $d_{\textrm{quant}}$} This paragraph explains why FedAQ needs to send only $d_{\text{quant}} = O(\log \frac{1}{q})$ bits for each value. We use the result of Lemma 3.1 in \cite{Yeojoon-alistarh2017qsgd}. They show the below result with a low-precision quantizer (Example 1 in \cref{problem_setup})
+\begin{align*}
+    \mathbb{E}[\|Q(x, s) - x\|_2^2] \leq \min(\frac{n}{s^2}, \frac{\sqrt{n}}{s}) \|x\|_2^2
+\end{align*}
+where $n$ is the dimension of $x$, and $s$ is the number of quantization levels. Then, we regard $q$ as
+\begin{align} \label{q_equation}
+    q = \frac{\sqrt{n}}{s} = \frac{\sqrt{n}}{2^{d_{\textrm{quant}}}}
+\end{align}
+Thus, we obtain the following conclusion.
+\begin{align*}
+    d_{\textrm{quant}} = \frac{\frac{1}{2}\log n + \log \frac{1}{q}}{\log 2} = O(\log \frac{1}{q})
+\end{align*}
+
+\paragraph{Comparing FedAQ to FedAC}  We compare computation and communication efficiency of FedAC-II and FedAQ under the condition set (\ref{parameter2_FedAQ}) to achieve the same error. Let's recall the convergence rate of FedAC and FedAQ. The convergence rate of FedAC and FedAQ is respectively $\Tilde{\mathcal{O}}(\frac{1}{MT}+\frac{1}{TK^3})$ and $\Tilde{\mathcal{O}}(\frac{1+q}{MT}+\frac{1+q}{TK^3})$. Let's say FedAC requires $T$ iterations and $K = M^{\frac{1}{3}}$ communication rounds to achieve the error $\frac{1}{MT}$. Then, FedAQ requires
+\begin{gather*}
+    T^\prime = (1+q)T, \textrm{ } K^\prime = M^{\frac{1}{3}}
+\end{gather*}
+to achieve the same error $\frac{1}{MT}$. This means FedAQ needs $1+q$ times more local steps and the same number of communication rounds to achieve the same error of FedAC. These local steps do no require any communication with the server hence can be performed without any additional communication overhead.
+
+From discussion in the previous section, if we use the simple low-precision quantizer, we need only $d_{\text{quant}} = O(\log \frac{1}{q})$ bits for communicating values with enough precision that can lead to an error rate of $O(\frac{1}{MT})$. In comparison, FedAC would require $O(\log (MT))$ bits to maintain enough precision to achieve the same error rate. In a majority of tasks in the real world, 32 bits are usually enough for $d_{\textrm{full}}$ to achieve enough precision as we usually don't need converge to a very small error rate. Nonetheless, even if we compare FedAQ(8bits) with to FedAC(32bits), we argue that the overall benefit from less communication by quantization is more influential than the slowdown effect from quantization.
+
+For example, if we consider a $l_2$-regularized logistic regression model for MNIST (strongly convex experiment) and quantize from 32 bits to $d_{\text{quant}} = 8$ bits. Here, $n = 784 \times 10$. We get the following results by using (\ref{q_equation}).
+\begin{align*} %\label{app:eqC.3}
+    1+q = 1+ \frac{\sqrt{n}}{2^{d_{\textrm{quant}}}} = 1+\frac{\sqrt{7840}}{2^8} \simeq 1.346, \textrm{}
+\end{align*}
+On the other hand, the ratio of data communicated by FedAC and FedAQ is
+
+\begin{equation*}
+    \frac{32}{d_{\textrm{quant}}} = 4
+\end{equation*}
+
+In contribution \ref{contribution2}, we claim $1+q \ll \frac{d_{\text{full}}}{d_{\text{quant}}}$ because $d_{\textrm{full}}$ is unbounded as $T$ goes to infinity. In the real world example, $\frac{d_{\text{full}}}{d_{\text{quant}}}=4$ is still much greater than $1+q$. Furthermore, since the local computation is much cheaper than data communication, we conclude that the benefit from less communication by quantization (4 times less bits) overwhelm the slowdown effect from quantization (($1+q$) times more local computation).
+
+\section{Experiments}
+\label{experiment}
+
+In this section, we provide experimental results of FedAQ in homogeneous local data distribution settings. We compare FedAQ with other quantization-based federated optimization algorithms, FedPAQ \cite{Yeojoon-reisizadeh2020fedpaq} and FedCOMGATE \cite{Yeojoon-haddadpour2021federated}. FedAvg \cite{Yeojoon-mcmahan2017communication} and FedAC \cite{Yeojoon-yuan2020federated}, federated optimization algorithms without quantization, are also our baselines. We empirically validate the performance of 5 algorithms on classical classification tasks on MNIST\cite{Yeojoon-lecun1998mnist} and CIFAR-10\cite{Yeojoon-krizhevsky2009learning} datasets in the distributed learning environment. We consider three objective functions i) A strongly convex objective of $l_2$-regularized logistic regression model on the MNIST dataset, ii) A non convex objective of training a multilayer perceptron on the MNIST data, and iii) A non convex objective of training a convolution neural network (CNN) on the CIFAR-10 dataset. %The details of the implementation environment, datasets, training models, hyperparameter choices, quantization bits, and new time metric are elaborated in Appx.~\ref{app:experimental_setup}.
+
+% \begin{figure*}[!htbp]
+%     \centering
+%     % Figure 0
+%     \begin{subfigure}[b]{0.31\textwidth}
+%     \includegraphics[width=\textwidth]{figure/loss_iid_comm_str_cvx.png}
+%     %\caption{DCGAN}
+%     \end{subfigure}
+%     % Figure 1
+%     \begin{subfigure}[b]{0.31\textwidth}
+%     \includegraphics[width=\textwidth]{figure/loss_iid_bits_str_cvx.png}
+%     %\caption{DCGAN}
+%     \end{subfigure}
+%     %\quad
+%     % Figure 2
+%     \begin{subfigure}[b]{0.31\textwidth}
+%     \includegraphics[width=\textwidth]{figure/loss_iid_time_str_cvx.png}
+%     %\caption{OKGAN}
+%     \end{subfigure}
+
+%     \setcounter{subfigure}{0}
+%     % Figure 0
+%     \begin{subfigure}[b]{0.31\textwidth}
+%     \includegraphics[width=\textwidth]{figure/loss_iid_comm_localstep_100_2.png}
+%     %\caption{DCGAN}
+%     \end{subfigure}
+%     % Figure 1
+%     \begin{subfigure}[b]{0.31\textwidth}
+%     \includegraphics[width=\textwidth]{figure/loss_iid_bits_localstep_100_2.png}
+%     %\caption{DCGAN}
+%     \end{subfigure}
+%     %\quad
+%     % Figure 2
+%     \begin{subfigure}[b]{0.31\textwidth}
+%     \includegraphics[width=\textwidth]{figure/loss_iid_time_localstep_100_2.png}
+%     %\caption{OKGAN}
+%     \end{subfigure}
+%     \caption{Comparing FedAQ with FedAvg, FedPAQ, FedCOMGATE, and FedAC on MNIST with Strongly Convex Settings (first row) and Non-Convex Settings (second row). We observe how the global training loss changes across communication rounds (first column), communicated bits (second column), and human time (third column). FedAQ-I(8bits) and FedAQ(4bits) respectively outperform other algorithms for strongly convex settings and non-convex settings. FedAQ(4bits) sends the same number of communicated bits as FedPAQ(8bits) and FedCOMGATE(8bits) in each communication round, which indicates a fair comparison (See Quantization bits in Appx.~\ref{app:experimental_setup}).}
+%     \label{graph_in_main_body}
+% \end{figure*}
+
+\subsection{Experimental Setup}
+\label{experimental_setup}
+
+\paragraph{Implementation Environment.} We follow the implementation setup in \cite{Yeojoon-haddadpour2021federated}. We use the Distributed library of PyTorch to implement our algorithm because this library allows us to simulate real-world communication and distributed training. The 18 cores of Intel Xeon E5-2676 CPU are used as computing sources. Each core is considered as one local client. We use 16 cores for strongly convex MNIST, 18 cores for the non-convex MNIST, and 8 cores for the CIFAR-10. For MNIST, the strongly convex experiment and the non-convex one respectively run for 300 rounds of communication with 20 local updates and 50 rounds of communication with 100 local updates. The CIFAR-10 experiment runs for 100 rounds of communication with 100 local updates.
+
+\paragraph{Datasets.} For image classification tasks, we choose two main classical image datasets: MNIST and CIFAR-10. Since we assume homogeneous settings, data is distributed homogeneously among clients, which also means each device has access to all 10 classes.
+
+% \paragraph{Training Models.} For MNIST, we use a $l_2$-regularized logistic regression model for the strongly convex case and a multilayer perceptron (MLP) with two hidden layers for the non-convex case. For CIFAR-10, we use a Convolutional Neural Network (CNN). Here, we note that the number of parameters in a neural network model is directly related to the number of communicated bits. We discuss more on this in Appx.~\ref{app:NN_comm_bits}.
+
+\paragraph{Hyperparameter Choice.} The important hyperparmeters in our experiments are learning rates for each algorithm. For the client learning rate $\eta$, we respectively use 0.002, 0.1, and 0.01 for strongly convex MNIST, non-convex MNIST, and CIFAR-10 for all algorithms. For FedAQ and FedAC, once we set the value of $\mu$, other hyperparameters ($\gamma, \alpha, \beta$) are automatically determined (See condition set (\ref{parameter_FedAQ}) and (\ref{parameter2_FedAQ})). Thus, we choose 0.1, 0.01, and 0.2 for $\mu$ value for strongly convex MNIST, non-convex MNIST, and CIFAR-10. Since too large $\mu$ leads to slow convergence and too small $\mu$ leads to unstable training, we get these $\mu$ values by tuning $\mu$ appropriately. FedCOMGATE has a server learning rate, and we set this value as 1 for all experiments.
+
+\paragraph{Quantization Bits.} We have three quantization-based federated algorithms: FedAQ, FedPAQ, FedCOMGATE. We quantize the updates from 32 bits to 8 bits for all quantization-based algorithms in both MNIST and CIFAR-10. Additionally, particularly for FedAQ in non-convex experiments, we consider 4 bits quantization as well. Since FedAQ sends twice as many messages as FedPAQ or FedCOMGATE at every synchronization when we use 8 bits quantization for all cases, we apply 4 bits quantization to FedAQ to let FedAQ send the same amount of information in each communication round as other quantization-based algorithms for a fair comparison.
+
+\paragraph{New Time Metric.} In our experiments, communication between CPU cores is very fast, so it is hard to say that the environment of our experiments fully reflects the real-world federated learning when there is a heavy communication burden. Thus, we use a linear model to estimate the execution time $T_{\textrm{round}}(\mathcal{A})$ between two consecutive communication rounds for real federated learning scenarios \cite{Yeojoon-wang2021field}.
+\begin{align*}
+    &T_{\textrm{round}}(\mathcal{A}) = T_{\textrm{comm}}(\mathcal{A})+T_{\textrm{comp}}(\mathcal{A}), & &T_{\textrm{comm}}(\mathcal{A}) = \frac{S_{\textrm{down}(\mathcal{A})}}{B_{\textrm{down}}} + \frac{S_{\textrm{up}(\mathcal{A})}}{B_{\textrm{up}}} \\
+    &T_{\textrm{comp}}(\mathcal{A}) = \max_j T_{\textrm{client}}^j(\mathcal{A}) + T_{\textrm{server}}(\mathcal{A}), & &T_{\textrm{client}}^j(\mathcal{A}) = R_{\textrm{comp}}T_{\textrm{sim}}^j (\mathcal{A}) + C_{\textrm{comp}}
+\end{align*}
+Since $T_{\textrm{server}}(\mathcal{A})$ is relatively smaller than $T_{\textrm{client}}^j(\mathcal{A})$, we ignore $T_{\textrm{server}}(\mathcal{A})$ in our experiments. We get client download size $S_{\textrm{down}(\mathcal{A})}$ and upload size $S_{\textrm{up}(\mathcal{A})}$ from the number of neural network parameters. $\max_j T_{\textrm{sim}}^j(\mathcal{A})$ is the computation time in our simulation.
+\begin{align*}
+    B_{\textrm{down}} \sim 0.75 \textrm{MB/secs},\textrm{ } B_{\textrm{up}} \sim 0.25 \textrm{B/secs},\textrm{ } R_{\textrm{comp}} \sim 7,\textrm{ } C_{\textrm{comp}} \sim 10 \textrm{secs}
+\end{align*}
+\cite{Yeojoon-wang2021field} estimate each value of the above parameters from a real world cross-device FL system. The upload bandwidth $B_{\textrm{up}}$ is generally smaller than download bandwidth $B_{\textrm{down}}$. We define human time as the parallel time estimated by this new time metric.
+
+\subsubsection{Training Models}
+
+For MNIST, we use a $l_2$-regularized logistic regression model for the strongly convex case and a multilayer perceptron (MLP) with two hidden layers for the non-convex case. For CIFAR-10, we use a Convolutional Neural Network (CNN). Here, we note that the number of parameters in a neural network model is directly related to the number of communicated bits. We discuss more details as follows.
+
+\paragraph{MLP Model for MNIST.} We use a multilayer perceptron (MLP) with two hidden layers. Each hidden layer consists of 200 neurons with ReLU activations. Thus, we compute the total number of parameters in this MLP model as below.
+\begin{align*}
+    (\# \textrm{ of MLP parameters) } &= (\# \textrm{ of input features) } \times (\# \textrm{ of neurons in the 1st layer}) \\
+    &+ (\# \textrm{ of neurons in the 1st layer) } \times (\# \textrm{ of neurons in the 2nd layer}) \\
+    &+ (\# \textrm{ of neurons in the 2nd layer) } \times (\# \textrm{ of MNIST classes}) \\
+    &+ (\# \textrm{ of neurons in the 1st layer) } + (\# \textrm{ of neurons in the 2nd layer) } \\
+    &+ (\# \textrm{ of MNIST classes}) \\
+    &= 28 \times 28 \times 200 + 200 \times 200 + 200 \times 10 + 200 + 200 + 10 = 199210
+\end{align*}
+Finally, we derive $S_\textrm{up}(\mathcal{A}) (= S_\textrm{down}(\mathcal{A})$), defined in \cref{experimental_setup} (New time metric), by using the above fact. We use 32 bits floating-point if there is no quantization.
+\begin{align*}
+    S_\textrm{up}(\mathcal{A}) &= (\# \textrm{ of device) } \times (\# \textrm{ of MLP parameters) } \times (\# \textrm{ of bits)} \\
+    &= 18 \times 199210 \times 32 = 114744960
+\end{align*}
+The FedAvg algorithm follows the above calculation. If we use 8 bits quantization for FedPAQ, FedCOMGATE, and FedAQ, ($\#$ of bits) in the above equation will respectively be  8, 8, and 16. Since FedAQ sends twice as many messages as others at every communication round, ($\#$ of bits) for FedAQ is 16. Similarly, ($\#$ of bits) for FedAC, which has no quantization, is 64.
+
+\paragraph{CNN Model for CIFAR-10.} We use a CNN model, which consists of two 2-dimensional convolutional layers, two max pooling layers, and two fully connected layers. The ReLU activations are used in this CNN model. Let's clarify ($\#$ of input channel, $\#$ of output channel, kernel size, stride) for convolutional layers. We respectively use (3, 20, 5, 1), (20, 50, 5, 1) for the 1st and 2nd convolutional layer. Let's denote each convolutional layer and fully connected layer as CONV1, CONV2, FC3, FC4. At first, the activation shape of input layer for CIFAR-10 is (32, 32, 3). Then, we get the activation shape after CONV1 and the number of parameters for CONV1.
+\begin{align*}
+    (\textrm{width of activation shape) } &= \frac{\textrm{(width of previous activation shape) } - \textrm{kernel size} + 1}{\textrm{stride}} \\
+    &= \frac{32-5+1}{1} = 28 \textrm{ } \Rightarrow \textrm{ activation shape} = (28, 28, 20) \\
+    (\# \textrm{ of CONV1 parameters) } &= \Big(\textrm{kernel size } \times \textrm{ kernel size } \\
+    &\times (\# \textrm{ of filters in the previous layer) }+1 \Big) \\
+    &\times (\# \textrm{ of filters in the current layer}) \\
+    &= (5 \times 5 \times 3 + 1) \times 20 = 1520
+\end{align*}
+The activation shape becomes (14, 14, 20) after max pooling. There are no learnable parameters in pooling layers. We do similar calculation for CONV2.
+\begin{align*}
+    (\textrm{width of activation shape) } &= \frac{\textrm{(width of previous activation shape) } - \textrm{kernel size} + 1}{\textrm{stride}} \\
+    &= \frac{14-5+1}{1} = 10 \textrm{ } \Rightarrow \textrm{ activation shape} = (10, 10, 50) \\
+    (\# \textrm{ of CONV2 parameters) } &= \Big(\textrm{kernel size } \times \textrm{ kernel size } \times (\# \textrm{ of filters in the previous layer) }\\
+    &+1\Big) \times (\# \textrm{ of filters in the current layer}) \\
+    &= (5 \times 5 \times 20 + 1) \times 50 = 25050
+\end{align*}
+The activation shape becomes (5, 5, 50) after second max pooling. Then, we calculate the number of parameters in FC3 and FC4 similar to the MLP case.
+\begin{align*}
+    (\# \textrm{ of FC3 parameters }) &= (5 \times 5 \times 50) \times 512 + 512 = 640512 \\
+    (\# \textrm{ of FC4 parameters }) &= 512 \times 10 + 10 = 5130
+\end{align*}
+Thus, the total number of parameters in this CNN model is
+\begin{align*}
+    (\# \textrm{ of CNN parameters) } &= (\# \textrm{ of CONV1 parameters) } + (\# \textrm{ of CONV2 parameters) } \\
+    &+ (\# \textrm{ of FC3 parameters) } + (\# \textrm{ of FC4 parameters) } \\
+    &= 1520 + 25050 + 640512 + 5130 = 672212
+\end{align*}
+Finally, we derive $S_\textrm{up}(\mathcal{A}) (= S_\textrm{down}(\mathcal{A})$) in this case.
+\begin{align*}
+    S_\textrm{up}(\mathcal{A}) &= (\# \textrm{ of device) } \times (\# \textrm{ of CNN parameters) } \times (\# \textrm{ of bits)} \\
+    &= 8 \times 672212 \times 32 = 172086272
+\end{align*}
+We can do the similar discussion in the MLP case when it comes to applying this to quantization-based federated optimization algorithms.
+
+\subsection{Experimental Results}
+\label{experimental_results}
+
+In our experiments on both MNIST and CIFAR-10, we verify how the global training loss and test accuracy of five algorithms change with respect to communication rounds, the number of bits communicated between one client and the server during the uplink, and human time. We provide both qualitative analysis and quantitative results for plots.
+
+\subsubsection{Qualitative Analysis}
+\label{qualitative_analysis}
+
+\paragraph{Strongly Convex Case.} In this experiment, we compare FedAQ under the condition set (\ref{parameter_FedAQ}) and set (\ref{parameter2_FedAQ}) with FedAvg, FedPAQ, FedCOMGATE, and FedAC-I. We denote each FedAQ as FedAQ-I and FedAQ-II. As we observe the theoretical benefits of FedAQ over other methods in \cref{convergence_analysis}, FedAQ-I outperforms all other quantization-based federated optimization algorithms and FedAC-I in all plots (See each first row of Figure \ref{graph_in_main_body}, \ref{mnist_graph}). However, although FedAQ-II shows the fast convergence speed, the training process is unstable. Thus, we only use FedAQ-I for further non-convex experiments. FedAC and FedAQ in non-convex experiments indicate FedAC-I and FedAQ-I.
+
+\paragraph{Non-Convex Case.} Each second row of Figure \ref{graph_in_main_body}, \ref{mnist_graph}, and Figure \ref{cifar10_graph} clearly demonstrates that FedAQ with 4 bits quantization outperforms other algorithms in all plots. In terms of communication rounds, accelerated algorithms, FedAQ and FedAC, converge faster than other algorithms. We also observe that quantization does not lead to slower convergence, which means we can apply an efficient quantization scheme to make communication efficient FL systems without sacrificing convergence speed. The plots related to communicated bits are helpful to interpret how algorithms work well in situations with heavy communication. FedAQ with 8 bits quantization shows comparable performance relative to FedPAQ and FedCOMGATE with the help of acceleration, even though FedAQ sends more updates during every synchronization. When we use 4 bits quantization for FedAQ to make the number of communicated bits the same for all quantization-based algorithms during synchronization, FedAQ shows a much faster convergence speed with regard to the number of communicated bits. However, plots of communicated bits fail to reflect how algorithms converge in real estimated time for FL scenarios, which consists of both communication and computation. Thus, we further analyze algorithms with human time. We observe that FedAQ with 8 quantization bits performs slightly better than FedPAQ and FedCOMGATE for both MNIST and CIFAR-10. This occurs because while all quantization-based algorithms send the same number of communicated bits, the number of communication rounds for FedAQ is much smaller than others. Then, this also indicates that FedAQ takes less computation time than other methods while reaching the same accuracy.
+
+\subsubsection{Quantitative Results}
+\label{app:quantitative_graphs}
+
+We provide quantitative results to help readers understand plots better. To be specific, for all plots, we observe the number of communication rounds, the number of communicated bits, and the human time required to achieve a particular test accuracy by each federated optimization algorithm.
+
+For the strongly convex experiment on MNIST (See the first row of Figure \ref{mnist_graph}), the number of communication rounds required to achieve 90.28\% test accuracy by FedAvg, FedPAQ(8bits), FedCOMGATE(8bits), FedAC-I, FedAQ-I(8bits), FedAQ-II(8bits) are respectively 217, 216, 260, 28, 26, 99. The number of communicated bits required to achieve the same accuracy are respectively 5.4e7, 1.4e7, 1.6e7, 1.4e7, 3.3e6, 1.2e7. Lastly, the required human time are respectively 3220s, 2760s, 3336s, 484s, 344s, 1323s. In this experiment, FedAQ-I(8bits) requires the smallest number of communication rounds, the smallest number of communicated bits, and the shortest human time to achieve the same test accuracy. These experimental results support the validity of our theoretical analysis on strongly convex cases.
+
+For the non-convex experiment on MNIST (See the second row of Figure \ref{mnist_graph}), the number of communication rounds required to achieve 97.6\% test accuracy by FedAvg, FedPAQ(8bits), FedCOMGATE(8bits), FedAC, FedAQ(8bits), FedAQ(4bits) are respectively 23, 48, 38, 18, 18, 16. The number of communicated bits required to achieve the same accuracy are respectively 1.5e8, 7.6e7, 6.1e7, 2.3e8, 5.7e7, 2.5e7. Finally, the required human time are respectively 2424s, 2311s, 1834s, 3327s, 1248s, 805s. Thus, we conclude that FedAQ(4bits) outperforms other algorithms, and even FedAQ(8bits) needs smaller number of communicated bits/less human time to achieve the goal accuracy than FedPAQ(8bits)/FedCOMGATE(8bits).
+
+For the non-convex experiment on CIFAR-10 (See Figure \ref{cifar10_graph}), the number of communication rounds required to achieve 65.4\% test accuracy by FedAvg, FedPAQ(8bits), FedCOMGATE(8bits), FedAC, FedAQ(8bits), FedAQ(4bits) are respectively 98, 89, 95, 49, 50, 48. The number of communicated bits required to achieve the same accuracy are respectively 2.1e9, 4.8e8, 5.1e8, 2.1e9, 5.4e8, 2.6e8. Finally, the required human time are respectively 31798s, 11526s, 12240s, 28720s, 9902s, 6464s. As with the non-convex experiment on MNIST, FedAQ(4bits) outperforms other algorithms, and even FedAQ(8bits) requires less human time to achieve the same accuracy than FedPAQ(8bits)/FedCOMGATE(8bits).
+
+\begin{remark}
+Our current experimental setup only allows us to scale the number of clients up to the number of CPU cores in our machine. Since FedAQ achieves linear speed up in the number of workers with much fewer communication rounds than other quantization based methods, we expect FedAQ to outperform other methods by an even larger margin as we scale the number of workers.
+\end{remark}
+
+\begin{figure*}[!htbp]
+    \centering
+    % Figure 0
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_comm_str_cvx.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    % Figure 1
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_bits_str_cvx.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    %\quad
+    % Figure 2
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_time_str_cvx.png}
+    %\caption{OKGAN}
+    }
+    \end{subfigure}
+
+    \setcounter{subfigure}{0}
+    % Figure 0
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_comm_localstep_100_2.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    % Figure 1
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_bits_localstep_100_2.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    %\quad
+    % Figure 2
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_time_localstep_100_2.png}
+    %\caption{OKGAN}
+    }
+    \end{subfigure}
+    \caption{Comparing FedAQ with FedAvg, FedPAQ, FedCOMGATE, and FedAC on MNIST with Strongly Convex Settings (first row) and Non-Convex Settings (second row). We observe how the global training loss changes across communication rounds (first column), communicated bits (second column), and human time (third column). FedAQ-I(8bits) and FedAQ(4bits) respectively outperform other algorithms for strongly convex settings and non-convex settings. FedAQ(4bits) sends the same number of communicated bits as FedPAQ(8bits) and FedCOMGATE(8bits) in each communication round, which indicates a fair comparison (See Quantization bits in \cref{experimental_setup}).}
+    \label{graph_in_main_body}
+\end{figure*}
+
+\begin{figure*}[hbt!]%[!htbp]
+    \centering
+    % Figure 0
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_comm_str_cvx.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    % Figure 1
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_bits_str_cvx.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    %\quad
+    % Figure 2
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_time_str_cvx.png}
+    %\caption{OKGAN}
+    }
+    \end{subfigure}
+
+    \setcounter{subfigure}{0}
+    % Figure 0
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_comm_localstep_100_2.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    % Figure 1
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_bits_localstep_100_2.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    %\quad
+    % Figure 2
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_time_localstep_100_2.png}
+    %\caption{OKGAN}
+    }
+    \end{subfigure}
+    \caption{Comparing FedAQ with FedAvg, FedPAQ, FedCOMGATE, and FedAC on MNIST with Strongly Convex Settings (first row) and Non-Convex Settings (second row). We observe how the test accuracy changes across communication rounds (first column), communicated bits (second column), and human time (third column). FedAQ-I outperforms other algorithms in all plots for strongly convex settings. Moreover, FedAQ(4bits) outperforms other algorithms in all plots for non-convex settings.}
+    \label{mnist_graph}
+\end{figure*}
+%\FloatBarrier
+
+\begin{figure*}[hbt!]%[!htbp]
+    \centering
+    % Figure 0
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_comm_cnn_step100.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    % Figure 1
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_bits_cnn_step100.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    %\quad
+    % Figure 2
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/loss_iid_time_cnn_step100.png}
+    %\caption{OKGAN}
+    }
+    \end{subfigure}
+
+    \setcounter{subfigure}{0}
+    % Figure 0
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_comm_cnn_step100.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    % Figure 1
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_bits_cnn_step100.png}
+    %\caption{DCGAN}
+    }
+    \end{subfigure}
+    %\quad
+    % Figure 2
+    \begin{subfigure}[]{
+    \includegraphics[width=0.31\textwidth]{submissions/YeojoonYoun/figure/accuracy_iid_time_cnn_step100.png}
+    %\caption{OKGAN}
+    }
+    \end{subfigure}
+    \caption{Comparing FedAQ with FedAvg, FedPAQ, FedCOMGATE, and FedAC on CIFAR-10. We observe how the global training loss and test accuracy change across communication rounds (first column), communicated bits (second column), and human time (third column). We use a CNN model for CIFAR-10. Similar to the MNIST experiment, FedAQ (4 bits) outperforms all other algorithms in every case.}
+    \label{cifar10_graph}
+\end{figure*}
+
+
+\section{Conclusion}
+\label{discussion}
+
+To sum up, we propose a novel communication-efficient federated optimization algorithm, FedAQ, that successfully incorporates accelerated multiple local updates and quantization with solid theoretical guarantees in strongly-convex and homogeneous settings. In the future, further theoretical guarantees of FedAQ on convex and non-convex functions should be discussed. Also, the convergence analysis of FedAQ on heterogeneous settings can be an interesting topic. Even though Federated Learning systems provide some level of privacy to the clients as their explicit data is not shared with the servers, careful examination of FL systems including FedAQ is necessary to examine how much privacy do they actually provide as information is shared in form of the iterates.
 %\small
 %\bibliographystyle{abbrv} %abbrv
 %\bibliography{submissions/YeojoonYoun/ref}
 
 \begin{thebibliography}{10}
 
-\bibitem{alistarh2017qsgd}
+\bibitem{Yeojoon-alistarh2017qsgd}
 D.~Alistarh, D.~Grubic, J.~Li, R.~Tomioka, and M.~Vojnovic.
 \newblock Qsgd: Communication-efficient sgd via gradient quantization and
   encoding.
 \newblock {\em Advances in Neural Information Processing Systems},
   30:1709--1720, 2017.
 
-\bibitem{bansal2019potential}
+\bibitem{Yeojoon-bansal2019potential}
 N.~Bansal and A.~Gupta.
 \newblock Potential-function proofs for gradient methods.
 \newblock {\em Theory of Computing}, 15(1):1--32, 2019.
 
-\bibitem{basu2019qsparse}
+\bibitem{Yeojoon-basu2019qsparse}
 D.~Basu, D.~Data, C.~Karakus, and S.~Diggavi.
 \newblock Qsparse-local-sgd: Distributed sgd with quantization, sparsification,
   and local computations.
 \newblock {\em arXiv preprint arXiv:1906.02367}, 2019.
 
-\bibitem{bernstein2018signsgd}
+\bibitem{Yeojoon-bernstein2018signsgd}
 J.~Bernstein, Y.-X. Wang, K.~Azizzadenesheli, and A.~Anandkumar.
 \newblock signsgd: Compressed optimisation for non-convex problems.
 \newblock In {\em International Conference on Machine Learning}, pages
   560--569. PMLR, 2018.
 
-\bibitem{brown2020language}
+\bibitem{Yeojoon-brown2020language}
 T.~Brown, B.~Mann, N.~Ryder, M.~Subbiah, J.~D. Kaplan, P.~Dhariwal,
   A.~Neelakantan, P.~Shyam, G.~Sastry, A.~Askell, et~al.
 \newblock Language models are few-shot learners.
 \newblock {\em Advances in neural information processing systems},
   33:1877--1901, 2020.
 
-\bibitem{ghadimi2012optimal}
+\bibitem{Yeojoon-ghadimi2012optimal}
 S.~Ghadimi and G.~Lan.
 \newblock Optimal stochastic approximation algorithms for strongly convex
   stochastic composite optimization i: A generic algorithmic framework.
 \newblock {\em SIAM Journal on Optimization}, 22(4):1469--1492, 2012.
 
-\bibitem{haddadpour2019local}
+\bibitem{Yeojoon-haddadpour2019local}
 F.~Haddadpour, M.~M. Kamani, M.~Mahdavi, and V.~Cadambe.
 \newblock Local sgd with periodic averaging: Tighter analysis and adaptive
   synchronization.
 \newblock In {\em Advances in Neural Information Processing Systems}, pages
   11082--11094, 2019.
 
-\bibitem{haddadpour2019trading}
+\bibitem{Yeojoon-haddadpour2019trading}
 F.~Haddadpour, M.~M. Kamani, M.~Mahdavi, and V.~Cadambe.
 \newblock Trading redundancy for communication: Speeding up distributed sgd for
   non-convex optimization.
 \newblock In {\em International Conference on Machine Learning}, pages
   2545--2554. PMLR, 2019.
 
-\bibitem{haddadpour2021federated}
+\bibitem{Yeojoon-haddadpour2021federated}
 F.~Haddadpour, M.~M. Kamani, A.~Mokhtari, and M.~Mahdavi.
 \newblock Federated learning with compression: Unified analysis and sharp
   guarantees.
 \newblock In {\em International Conference on Artificial Intelligence and
   Statistics}, pages 2350--2358. PMLR, 2021.
 
-\bibitem{haddadpour2019convergence}
+\bibitem{Yeojoon-haddadpour2019convergence}
 F.~Haddadpour and M.~Mahdavi.
 \newblock On the convergence of local descent methods in federated learning.
 \newblock {\em arXiv preprint arXiv:1910.14425}, 2019.
 
-\bibitem{horvath2019natural}
+\bibitem{Yeojoon-horvath2019natural}
 S.~Horvath, C.-Y. Ho, L.~Horvath, A.~N. Sahu, M.~Canini, and P.~Richt{\'a}rik.
 \newblock Natural compression for distributed deep learning.
 \newblock {\em arXiv preprint arXiv:1905.10988}, 2019.
 
-\bibitem{kairouz2019advances}
+\bibitem{Yeojoon-kairouz2019advances}
 P.~Kairouz, H.~B. McMahan, B.~Avent, A.~Bellet, M.~Bennis, A.~N. Bhagoji,
   K.~Bonawitz, Z.~Charles, G.~Cormode, R.~Cummings, et~al.
 \newblock Advances and open problems in federated learning.
 \newblock {\em arXiv preprint arXiv:1912.04977}, 2019.
 
-\bibitem{karimireddy2020mime}
+\bibitem{Yeojoon-karimireddy2020mime}
 S.~P. Karimireddy, M.~Jaggi, S.~Kale, M.~Mohri, S.~J. Reddi, S.~U. Stich, and
   A.~T. Suresh.
 \newblock Mime: Mimicking centralized stochastic algorithms in federated
   learning.
 \newblock {\em arXiv preprint arXiv:2008.03606}, 2020.
 
-\bibitem{karimireddy2020scaffold}
+\bibitem{Yeojoon-karimireddy2020scaffold}
 S.~P. Karimireddy, S.~Kale, M.~Mohri, S.~Reddi, S.~Stich, and A.~T. Suresh.
 \newblock Scaffold: Stochastic controlled averaging for federated learning.
 \newblock In {\em International Conference on Machine Learning}, pages
   5132--5143. PMLR, 2020.
 
-\bibitem{khaled2020tighter}
+\bibitem{Yeojoon-khaled2020tighter}
 A.~Khaled, K.~Mishchenko, and P.~Richt{\'a}rik.
 \newblock Tighter theory for local sgd on identical and heterogeneous data.
 \newblock In {\em International Conference on Artificial Intelligence and
   Statistics}, pages 4519--4529. PMLR, 2020.
 
-\bibitem{konevcny2016federated}
+\bibitem{Yeojoon-konevcny2016federated}
 J.~Kone{\v{c}}n{\`y}, H.~B. McMahan, F.~X. Yu, P.~Richt{\'a}rik, A.~T. Suresh,
   and D.~Bacon.
 \newblock Federated learning: Strategies for improving communication
   efficiency.
 \newblock {\em arXiv preprint arXiv:1610.05492}, 2016.
 
-\bibitem{krizhevsky2009learning}
+\bibitem{Yeojoon-krizhevsky2009learning}
 A.~Krizhevsky, G.~Hinton, et~al.
 \newblock Learning multiple layers of features from tiny images.
 \newblock Manuscript, 2009.
 
-\bibitem{lecun1998mnist}
+\bibitem{Yeojoon-lecun1998mnist}
 Y.~LeCun.
 \newblock The mnist database of handwritten digits.
 \newblock {\em http://yann. lecun. com/exdb/mnist/}, 1998.
 
-\bibitem{li2020federated}
+\bibitem{Yeojoon-li2020federated}
 T.~Li, A.~K. Sahu, A.~Talwalkar, and V.~Smith.
 \newblock Federated learning: Challenges, methods, and future directions.
 \newblock {\em IEEE Signal Processing Magazine}, 37(3):50--60, 2020.
 
-\bibitem{li2018federated}
+\bibitem{Yeojoon-li2018federated}
 T.~Li, A.~K. Sahu, M.~Zaheer, M.~Sanjabi, A.~Talwalkar, and V.~Smith.
 \newblock Federated optimization in heterogeneous networks.
 \newblock {\em arXiv preprint arXiv:1812.06127}, 2018.
 
-\bibitem{li2019convergence}
+\bibitem{Yeojoon-li2019convergence}
 X.~Li, K.~Huang, W.~Yang, S.~Wang, and Z.~Zhang.
 \newblock On the convergence of fedavg on non-iid data.
 \newblock {\em arXiv preprint arXiv:1907.02189}, 2019.
 
-\bibitem{li2022distributed}
+\bibitem{Yeojoon-li2022distributed}
 X.~Li, B.~Karimi, and P.~Li.
 \newblock On distributed adaptive optimization with gradient compression.
 \newblock {\em arXiv preprint arXiv:2205.05632}, 2022.
 
-\bibitem{li2020acceleration}
+\bibitem{Yeojoon-li2020acceleration}
 Z.~Li, D.~Kovalev, X.~Qian, and P.~Richt{\'a}rik.
 \newblock Acceleration for compressed gradient descent in distributed and
   federated optimization.
 \newblock {\em arXiv preprint arXiv:2002.11364}, 2020.
 
-\bibitem{li2021canita}
+\bibitem{Yeojoon-li2021canita}
 Z.~Li and P.~Richt{\'a}rik.
 \newblock Canita: Faster rates for distributed convex optimization with
   communication compression.
 \newblock {\em arXiv preprint arXiv:2107.09461}, 2021.
 
-\bibitem{lin2018don}
+\bibitem{Yeojoon-lin2018don}
 T.~Lin, S.~U. Stich, K.~K. Patel, and M.~Jaggi.
 \newblock Don't use large mini-batches, use local sgd.
 \newblock {\em arXiv preprint arXiv:1808.07217}, 2018.
 
-\bibitem{mcmahan2017communication}
+\bibitem{Yeojoon-mcmahan2017communication}
 B.~McMahan, E.~Moore, D.~Ramage, S.~Hampson, and B.~A. y~Arcas.
 \newblock Communication-efficient learning of deep networks from decentralized
   data.
 \newblock In {\em Artificial intelligence and statistics}, pages 1273--1282.
   PMLR, 2017.
 
-\bibitem{reisizadeh2020fedpaq}
+\bibitem{Yeojoon-reisizadeh2020fedpaq}
 A.~Reisizadeh, A.~Mokhtari, H.~Hassani, A.~Jadbabaie, and R.~Pedarsani.
 \newblock Fedpaq: A communication-efficient federated learning method with
   periodic averaging and quantization.
 \newblock In {\em International Conference on Artificial Intelligence and
   Statistics}, pages 2021--2031. PMLR, 2020.
 
-\bibitem{rothchild2020fetchsgd}
+\bibitem{Yeojoon-rothchild2020fetchsgd}
 D.~Rothchild, A.~Panda, E.~Ullah, N.~Ivkin, I.~Stoica, V.~Braverman,
   J.~Gonzalez, and R.~Arora.
 \newblock Fetchsgd: Communication-efficient federated learning with sketching.
 \newblock In {\em International Conference on Machine Learning}, pages
   8253--8265. PMLR, 2020.
 
-\bibitem{singh2021squarm}
+\bibitem{Yeojoon-singh2021squarm}
 N.~Singh, D.~Data, J.~George, and S.~Diggavi.
 \newblock Squarm-sgd: Communication-efficient momentum sgd for decentralized
   optimization.
 \newblock {\em IEEE Journal on Selected Areas in Information Theory}, 2021.
 
-\bibitem{stich2018local}
+\bibitem{Yeojoon-stich2018local}
 S.~U. Stich.
 \newblock Local sgd converges fast and communicates little.
 \newblock {\em arXiv preprint arXiv:1805.09767}, 2018.
 
-\bibitem{stich2019error}
+\bibitem{Yeojoon-stich2019error}
 S.~U. Stich and S.~P. Karimireddy.
 \newblock The error-feedback framework: Better rates for sgd with delayed
   gradients and compressed communication.
 \newblock {\em arXiv preprint arXiv:1909.05350}, 2019.
 
-\bibitem{suresh2017distributed}
+\bibitem{Yeojoon-suresh2017distributed}
 A.~T. Suresh, X.~Y. Felix, S.~Kumar, and H.~B. McMahan.
 \newblock Distributed mean estimation with limited communication.
 \newblock In {\em International Conference on Machine Learning}, pages
   3329--3337. PMLR, 2017.
 
-\bibitem{vogels2019powersgd}
+\bibitem{Yeojoon-vogels2019powersgd}
 T.~Vogels, S.~P. Karinireddy, and M.~Jaggi.
 \newblock Powersgd: Practical low-rank gradient compression for distributed
   optimization.
 \newblock {\em Advances In Neural Information Processing Systems 32 (Nips
   2019)}, 32(CONF), 2019.
 
-\bibitem{wang2018atomo}
+\bibitem{Yeojoon-wang2018atomo}
 H.~Wang, S.~Sievert, Z.~Charles, S.~Liu, S.~Wright, and D.~Papailiopoulos.
 \newblock Atomo: Communication-efficient learning via atomic sparsification.
 \newblock {\em arXiv preprint arXiv:1806.04090}, 2018.
 
-\bibitem{wang2021field}
+\bibitem{Yeojoon-wang2021field}
 J.~Wang, Z.~Charles, Z.~Xu, G.~Joshi, H.~B. McMahan, M.~Al-Shedivat, G.~Andrew,
   S.~Avestimehr, K.~Daly, D.~Data, et~al.
 \newblock A field guide to federated optimization.
 \newblock {\em arXiv preprint arXiv:2107.06917}, 2021.
 
-\bibitem{wang2018cooperative}
+\bibitem{Yeojoon-wang2018cooperative}
 J.~Wang and G.~Joshi.
 \newblock Cooperative sgd: A unified framework for the design and analysis of
   communication-efficient sgd algorithms.
 \newblock {\em arXiv preprint arXiv:1808.07576}, 2018.
 
-\bibitem{wang2021local}
+\bibitem{Yeojoon-wang2021local}
 J.~Wang, Z.~Xu, Z.~Garrett, Z.~Charles, L.~Liu, and G.~Joshi.
 \newblock Local adaptivity in federated learning: Convergence and consistency.
 \newblock {\em arXiv preprint arXiv:2106.02305}, 2021.
 
-\bibitem{wang2022communication}
+\bibitem{Yeojoon-wang2022communication}
 Y.~Wang, L.~Lin, and J.~Chen.
 \newblock Communication-efficient adaptive federated learning.
 \newblock {\em arXiv preprint arXiv:2205.02719}, 2022.
 
-\bibitem{wangni2017gradient}
+\bibitem{Yeojoon-wangni2017gradient}
 J.~Wangni, J.~Wang, J.~Liu, and T.~Zhang.
 \newblock Gradient sparsification for communication-efficient distributed
   optimization.
 \newblock {\em arXiv preprint arXiv:1710.09854}, 2017.
 
-\bibitem{woodworth2020local}
+\bibitem{Yeojoon-woodworth2020local}
 B.~Woodworth, K.~K. Patel, S.~Stich, Z.~Dai, B.~Bullins, B.~Mcmahan, O.~Shamir,
   and N.~Srebro.
 \newblock Is local sgd better than minibatch sgd?
 \newblock In {\em International Conference on Machine Learning}, pages
   10334--10343. PMLR, 2020.
 
-\bibitem{yu2019linear}
+\bibitem{Yeojoon-yu2019linear}
 H.~Yu, R.~Jin, and S.~Yang.
 \newblock On the linear speedup analysis of communication efficient momentum
   sgd for distributed non-convex optimization.
 \newblock In {\em International Conference on Machine Learning}, pages
   7184--7193. PMLR, 2019.
 
-\bibitem{yu2019parallel}
+\bibitem{Yeojoon-yu2019parallel}
 H.~Yu, S.~Yang, and S.~Zhu.
 \newblock Parallel restarted sgd with faster convergence and less
   communication: Demystifying why model averaging works for deep learning.
 \newblock In {\em Proceedings of the AAAI Conference on Artificial
   Intelligence}, volume~33, pages 5693--5700, 2019.
 
-\bibitem{yuan2020federated}
+\bibitem{Yeojoon-yuan2020federated}
 H.~Yuan and T.~Ma.
 \newblock Federated accelerated stochastic gradient descent.
 \newblock {\em Advances in Neural Information Processing Systems}, 33, 2020.
