@@ -1,0 +1,42 @@
+\section{Fact Ranking}\label{sec:usecase}
+
+\revise{Here we introduce the task of fact ranking and its corresponding applications that power critical user experiences over KGs.
+We define a fact on KG as a triple $(v_s, r, v_o)$, where $v_s$ and $v_o$ are entities and $r$ is a relation type from the KG.
+User queries we target (such as the  \emph{``What is the occupation of LeBron James?''}) correspond to queries of the form $q=(v_s, r, ?)$ .
+}
+
+% We now introduce the tasks of fact ranking that is a critical production task over KGs. First we define a fact on KG as a triple $(v_s, r, v_o)$, where $v_s$ and $v_o$ are entities and $r$ is a relation type from the KG. These tasks correspond to queries of the form $q=(v_s, r, ?)$.
+
+
+
+\subsection{Problem Description}\label{sec:ranking}
+Intelligent assistants rely on entity-centric experiences to answer user queries. For many of these experiences, facts or answers to queries are of different importance/accuracy/uncertainty to users. Besides providing all the answers, one key aspect of service quality is to display relevant facts in a sorted way according to the importance or uncertainty score. For example, the answer to a query \qu{What is the occupation of Selena Gomez?} includes \emph{singer} and \emph{child actor}, but for the majority of users, we know the answer \emph{singer} should rank higher than \emph{child actor}.
+The goal of fact ranking is to rank all the answers to a given set of queries that aligns well with user expectation. Fact ranking is ubiquitous in intelligent assistants and the key to improving the user experience. 
+
+We define fact ranking as follows: Given a query $q=(v_s, r, ?)$ for a subject $v_s$ and a predicate $r$ we see to find answers $\gA_q$ (achieved by graph traversal as discussed in \Secref{sec:prelim}) for the missing object. The goal of fact ranking is to find a function $\rank{a}$ which can be used to obtain an importance ranking for each answer $a\in\gA_q$ and generate the ranking list $[\rank{a_1}, \dots, \rank{a_n}], \:\: a_1, \dots, a_n\in\gA_q$. We focus on queries that target facts that cannot be ranked using simple popularity scores, \eg, occupations, genres \etc, (an occupation is not necessarily more important than the other).
+
+Unsupervised machine learning (ML) mechanisms are needed to learn a function $\rank{\cdot}$. It is typical that KGs do not associate any importance scores and weights to their edges, which applies to many large KGs including FreeBase~\cite{bollacker2008freebase} and WikiData~\cite{wikidata}. Consequently, it is not possible to use simple traversal mechanisms to implement the ranking functions for fact ranking and different mechanisms need to be considered. Such a mechanism may correspond to PageRank-based algorithms which can be used to assign an importance score for each answer $a$ (or fact $(q,a)$ with personalized PageRank), however, they are often not effective on such large-scale heterogeneous graphs where multiple edge types exist~\cite{10.1145/3447548.3467342}. To alleviate these challenges, we consider a setting (see Section~\ref{sec:method}) where \emph{unsupervised representation learning} is used to learn Function $\rank{\cdot}$.
+
+\iffalse
+\subsection{Fact Verification}\label{sec:verification}
+As introduced in \Secref{sec:intro}, industrial KGs are often noisy and contain missing facts. A critical task is to verify facts and impute missing facts to deliver high-accuracy services to users. 
+Most previous KG works formulate and evaluate this problem as a \emph{link prediction task}~\cite{wang2017know}: Given a query $q=(v_s, r, ?)$ and its missing object $v_o$, the methods plug in all the entities on the KG $\forall v\in\gV$ as object, score them and rank the missing objects against other entities. The goal is that the missing objects rank higher than the other true negative object entities. Based on the ranking, different methods are evaluated using different functions of the ranking, \eg, mean reciprocal rank (MRR), Hits@$k$ (H@$k$), for those missing answers/facts. 
+% 
+However, this formulation is impractical in real use cases since different queries vary in the number of answers and it is hard to define a threshold that strikes a good balance between covering all promising facts to verify and at the same time keep the size of the set minimum to reduce the cost of human curation.
+% 
+
+In this work, we define the fact verification task as follows:
+Given a set of triplets $\{(v_s^1, r^1, v_o^1), \dots, (v_s^n, r^n, v_o^n)\}$ to verify, the goal is to prioritize and select the most promising ones and use human curators to manually check the prioritized facts. Adopting a human-in-the-loop approach ensures that the strict precision requirements for industrial KGs are satisfied~\cite{apple_kp}. Promising triplets can either be (1) existing triplets on the graph that are considered as \emph{False}, and thus, human curators are required to check and remove the triplets from the graph or (2) non-existing triplets on the graph that are missing but are correct with high probability.
+The task definition shares a similar flavor with the triplet classification task. The idea is to perform a binary classification task over the list of triplets and find the promising ones.
+In this task, we evaluate methods using the AUC-ROC score, which measures how much better the method is compared with random sampling triplets from the given list.
+\fi
+
+
+\subsection{A Solution with KG Embeddings}\label{sec:method}
+We obtain a solution to the fact ranking problem by leveraging graph embedding models. This solution applies to both shallow KG embeddings and KG reasoning embeddings. 
+The idea is to first train the entity embeddings, relation embeddings, and neural logical operators on the KG using standard training protocols \cite{distmult,ren2020query2box} (see \Secref{sec:background}). Then, given a fact $(v_s,r,v_o)$, we can use the pre-trained embeddings to efficiently calculate the distance $\distt{v_s}{r}{v_o}$. The distance plays a crucial role for solving the fact ranking problem since it represents a \emph{proxy of plausibility of a fact}. This solution is inspired by our prior work on error detection, missing value imputation, and data repairs which showed that all problems correspond to inference tasks over a pre-trained model that learns how to \emph{reconstruct} the input data~\cite{de2018formal}. Nonetheless, using the distance obtained by different KG embedding models raises two critical considerations for industrial settings. 
+
+For fact ranking, the distance obtained by the KG embedding model can be applied to rank the candidate objects for a specific subject and object configuration. However, different models can learn significantly different geometries and in most cases the distances in these spaces can lead to significant variations in the obtained rankings. In the settings we consider, it is critical that the rankings obtained are stable (i.e., we do not have significant variations in the order of different objects) across training iterations of the embedding model. To this end, we use a post-processing step that verifies the stability of KG embedding models before deployment. This post-processing step utilizes a consistency metric that extends standard ranking comparison methods such as Kendall's Tau to also consider the distance value associated with each query (see Section~\ref{sec:consistency}). 
+
+%For fact verification, we convert the distances into \emph{calibrated confidence scores} across different subjects/predicates in the KG. This step is important as we need to obtain a unified prioritization score to decide which facts should be surfaced for verification to human graders. Past works~\cite{DBLP:conf/iclr/TabacofC20, sun2019re} have shown that the absolute distance calculated using \eqref{eq:kgelossfunc} is not well calibrated and leads to biased results. To this end, we design a separate post-processing step that converts the raw distance measurements from KG embeddings to calibrated scores. We provide a detailed discussion in Section~\ref{sec:calibration}.
+

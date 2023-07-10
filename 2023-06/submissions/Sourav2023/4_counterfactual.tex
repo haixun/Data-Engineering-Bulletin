@@ -1,0 +1,115 @@
+%\newpage
+\section{Counterfactual Explanation}
+\label{sec::Counterfactual}
+Counterfactual methods provides an explanation by identifying the minimal alteration in the input graph that results in a change in the model's prediction. Recently, there have been several attempts to have explanations of graph neural networks (GNNs) via counterfactual reasoning. We classify these explainer methods that find counterfactuals into three major categories based on the type of methods: \textbf{(1) Perturbation-based}, \textbf{(2) Neural framework-based}, and \textbf{(3) Search-based}. We discuss the works in the individual categories below. 
+
+\subsection{Perturbation-based methods} 
+An intuitive way to generate counterfactuals for both the graph classification and the node classification task is to \textit{alter the edges}, i.e., add or delete the edges in the graph such that it would change the prediction of the underlying GNN method. This alteration can be achieved by perturbing either the adjacency matrix or the computational graph of a node. The perturbation-based methods are summarized in Table \ref{tab::cf-perturbation}.
+
+One of the initial efforts, \textbf{CF-GNNExplainer} \cite{cfgnnex} aims to perturb the computational graph by using a binary mask matrix. It uses a binary matrix (all values are 0 or 1) $P$ and modifies the computational graph matrix as $\Tilde{A_v} = P \odot A_v$, where $A_v$ is the original computational graph matrix and $\Tilde{A_v}$ is computational graph matrix after the perturbation. The matrix $P$ is computed by minimizing a combination of two different loss functions: $L_{pred}$, and $L_{dist}$. They are combined using a hyper-parameter in the final loss ($L$) as $L_{pred} + \beta L_{dist}$. The loss function, $L_{pred}$ quantifies the accuracy of the produced counterfactual, and $L_{dist}$ captures the distance (or similarity) between the counterfactual graph and the original graph. In follow-up work, the method \textbf{CF\textsuperscript{2}} \cite{cf^2-counter} extends the method in CF-GNNExplainer \cite{cfgnnex} by including a contrastive loss that jointly optimizes the quality of both the factual explanation and the counterfactual one. For an input graph, $G$, it aims to find an optimal subgraph $G_s$ where $G_s$ is a good factual explanation, and $G \backslash G_s$ is a good counterfactual. These objectives are formulated as a single optimization problem with the corresponding loss as $L_{overall} = \alpha L_{factual} + (1 - \alpha)L_{counterfactual}$, where $\alpha$ is a hyperparameter.
+% In addition to edge mask, CFF uses a feature mask to extract important node features
+
+Another method, \textbf{GREASE}~\cite{chen2022grease} follows the standard technique of using a perturbation matrix to generate a counterfactual, but with two key modifications mainly to accommodate GNNs used for recommendation systems instead of classification tasks. In the recommendation task, GNNs rank the items (nodes) by assigning them a score instead of classifying them. GREASE uses a loss function based on the scores given by the GNN before and after the perturbation. This score helps to rank the items or nodes. The second modification is the perturbation matrix, which acts as the mask, and is used to perturb the computational graph (\textit{l}-hop neighborhood of the node) instead of perturbing the entire graph. Here \textit{l} denotes the number of layers in the GNN. Similar to CF\textsuperscript{2} \cite{cf^2-counter}, GREASE also optimizes counterfactual and factual explanation losses, but not jointly. %One more change from the standard method is the use of surrogate model to locally approximate the GNN used in the recommendation task.
+
+%-----In this paper the perturbations are limited to edge deletions.
+
+
+In summary, all these techniques share similarities in computing the counterfactual similarity and constructing the search space. Similarity is measured by the number of edges removed from input instances and the search space is the set of all subgraphs obtained by edge deletions in the original graph. Because of the unrestricted nature of the search space, these methods might not be ideal for graphs such as molecules, where the validity of the subgraphs has valency restrictions. On the other hand, the mentioned methods differ mainly in the loss function formulations and the perturbation operations for the downstream tasks. For instance, CF-GNNExplainer \cite{cfgnnex} and GREASE \cite{chen2022grease} perform node classification and regression, they can use perturbations on the computation graph. However, CF\textsuperscript{2} \cite{cf^2-counter} considers both graph and node classification tasks, hence it uses perturbations on the entire graph, i.e., the adjacency matrix.
+
+%\textbf{Summary:} Summing up the above techniques, they share some commonalities in how the counterfactual similarity is computed and what search space is considered when finding a counterfactual. In all these methods generally the number of edges removed from input instance is taken as the similarity metric. 
+% In the optimization objective this is included as L1 regularization on the perturbation matrix. 
+%The search space considered in these methods is the set of all subgraphs obtained by edge deletion on the original graph. This means, these methods might not be ideal for graphs such as molecules, where the validity of subgraph is not straightforward due to valency restrictions.
+
+%However, these methods differ mainly in the loss function formulation and the perturbation operation based on whether the underlying GNN is for graph or node classification/regression.
+% In the method \textbf{CF-GNNExplainer} \cite{cfgnnex}, only counterfactual loss is optimized. Whereas in CF\textsuperscript{2} \cite{cf^2-counter} both factual and counterfactual losses are jointly optimized using a contrastive loss formulation. And, in \textbf{GREASE} \cite{chen2022grease} both factual and counterfactual losses are optimized separately. 
+%Because the underlying GNN in \textbf{CF-GNNExplainer} \cite{cfgnnex} and \textbf{GREASE} \cite{chen2022grease} performs node classification/regression, these methods can use perturbations on the computation graph. However in CF\textsuperscript{2} \cite{cf^2-counter} the underlying GNN can perform both graph and node classification, hence it uses perturbations on entire graph, i.e., the adjacency matrix.
+
+\begin{table}[tb]
+  \centering
+  \scriptsize
+  \caption{Key highlights of \textit{perturbation-based} methods for counterfactuals}
+    \begin{tabular}{ccccc}
+    \toprule
+        \textbf{Method} & \textbf{Explanation Type} & \textbf{Downstream Task} & \textbf{Perturbation Target} & \textbf{Datasets Evaluated}  \\  \midrule
+        CF-GNNExplainer \cite{cfgnnex} & Instance level  & Node Classification  & Computation graph  & \makecell{Tree-Cycles \cite{ying2019gnnexplainer}, Tree-Grids \cite{ying2019gnnexplainer}\\BA-Shapes \cite{ying2019gnnexplainer}}  \\  \hline
+        CF\textsuperscript{2} \cite{cf^2-counter}  &  Instance level & \makecell{Graph Classification\\Node Classification}  & Original graph & \makecell{BA-Shapes \cite{ying2019gnnexplainer}, Tree-Cycles \cite{ying2019gnnexplainer} \\ Mutag \cite{mutag}, NCI1 \cite{NCI1_data}, CiteSeer \cite{getoor2005advanced}} \\  \hline
+        GREASE \cite{chen2022grease}  & Instance level  &  Node Ranking & Computation graph & LastFM, Yelp \\  \bottomrule
+    \end{tabular}%
+  \label{tab::cf-perturbation}%
+\end{table}%
+
+
+\subsection{Neural framework-based methods}
+The approaches in this section use neural architectures to generate counterfactual graphs as opposed to the perturbation-based methods where the adjacency matrix of the input graph is minimally perturbed to generate counterfactuals. Table \ref{tab::cf-neural} summarizes these methods.
+
+The objective of \textbf{RCExplainer} \cite{robust-counter} is to identify a resilient subset of edges that, when removed, alter the prediction of the remaining graph. This is accomplished by modeling the implicit decision regions using graph embeddings.
+%Unlike in the above methods to find counterfactuals, \textbf{RCExplainer} \cite{robust-counter} aims to find a robust subset of edges whose removal changes the prediction of the remaining graph by modeling the implicit decision regions based on the graph embeddings. 
+Even though the counterfactual graph generated by a neural architecture is used in conjunction with the adjacency matrix of the input graph, the counterfactual itself is not generated through perturbations on the adjacency matrix. RCExplainer addresses the issue of fragility where an interpretation is fragile (or non-robust) if systematic perturbations in the input graph can lead to dramatically different interpretations without changing the label. The standard explainers aim to generate good counterfactuals by choosing the closest counterfactual to the input instance and it might induce over-fitting. RCExplainer reduces this over-fitting by first clustering input graphs using polytopes, and finding good counterfactuals close to the cluster (polytope) instead of individual instances. Another method, \textbf{CLEAR} \cite{clear-counter} generates counterfactual graphs by leveraging a graph variational autoencoder. Two major issues often seen in other explainer methods, namely, generalization and causality are addressed in this paper.
+
+Both methods use a generative neural model to find counterfactuals, but the generative model is different across the methods. While \textbf{RCExplainer} \cite{robust-counter} uses a neural network that takes pairwise node embeddings and predict the existence of an edge between them, \textbf{CLEAR} \cite{clear-counter} uses a variational autoencoder to generate a complete graph. This shows that while the former method cannot create nodes that are not present in the original graph, the latter can. In terms of the objective, the primary focus in \textbf{RCExplainer} \cite{robust-counter} is the robustness of the generated counterfactual, but \textbf{CLEAR} \cite{clear-counter} aims to generate counterfactuals that explain the underlying causality.
+
+
+
+
+%Both methods use a generative neural network to find counterfactuals, but the generative model itself is quite different. While \textbf{RCExplainer} \cite{robust-counter} uses a neural network that takes pairwise node embeddings and predict the existence of an edge between them, \textbf{CLEAR} \cite{clear-counter} uses a variational autoencoder to generate a complete graph. This means that while former method cannot create nodes not present in the original graph, the latter can. Another important distinction is in the objective. While the primary focus in \textbf{RCExplainer} \cite{robust-counter} is robustness of the counterfactual, \textbf{CLEAR} \cite{clear-counter} aims at generating counterfactuals that can explain the underlying causality involved.
+
+\begin{table}[tb]
+\vspace{-2mm}
+\centering
+  \scriptsize
+  \caption{Key highlights of \textit{neural framework-based} methods for counterfactuals}
+    \begin{tabular}{ccccc}
+    \toprule
+        \textbf{Method} & \textbf{Explanation Type} & \textbf{Downstream Task} & \textbf{Counterfactual Generator} & \textbf{Datasets Evaluated}  \\  \midrule
+        RCExplainer \cite{robust-counter} & Instance level & \makecell{Graph classification\\Node classification} & \makecell{Edge prediction\\with Neural Network} & \makecell{Mutag \cite{mutag}, BA-2motifs \cite{pgexplainer}, NCI1 \cite{NCI1_data}\\ Tree-Cycles \cite{ying2019gnnexplainer}, Tree-Grids \cite{ying2019gnnexplainer} \\BA-Shapes \cite{pgexplainer}, BA-Community \cite{ying2019gnnexplainer}} \\  \hline
+        CLEAR \cite{clear-counter} & Instance level & \makecell{Graph classification\\Node classification} & \makecell{Graph generation\\with Variational Autoencoder} & \makecell{Community \cite{erd1959and}, Ogbg-molhiv,  IMDB-M} \\  \bottomrule
+    \end{tabular}%
+    \vspace{-1mm}  \label{tab::cf-neural}%
+\end{table}%
+
+
+%\textbf{Robust Counterfactual } \cite{robust-counter}:
+%In this paper, even though the counterfactual graph generated by the neural network is used in conjunction with the input graph's adjacency matrix, the counterfactual is not generated through perturbations on input graph's adjacency matrix. The main issue addressed in this paper is fragility. The paper defines fragility as follows. \textit{An interpretation is said to be fragile if systematic perturbations on input graph can lead to dramatically different interpretations without changing the label. Otherwise, the interpretation is said to be robust.}. In general, explainers try to generate good counterfactual by choosing the closest counterfactual to the input instance. This induces over-fitting. Here, the trick employed to reduce this over-fitting is by first clustering input graphs using polytopes, and finding good counterfactuals close to the cluster(polytope) instead of individual instances.\\
+
+%\textbf{CLEAR } \cite{clear-counter}: In this method, counterfactual graph is generated by leveraging a Graph variational Autoencoder. Two major issues often seen in other explainer methods, namely, generalization and causality are addressed in this paper. \textbf{/INCOMPLETE/}
+
+\subsection{Search-based methods}
+\label{sec::Counterfactual-search}
+These methods usually depend on search techniques over the counterfactual space for relevant tasks or applications (see the highlights in Table \ref{tab::cf-search}). For example, given an inactive molecule in a chemical reaction, the task is to find a similar but active molecule. Here, generative methods or perturbation methods might not be effective, and the perturbations might not even result in a valid molecule. In such cases, a good search technique through the space of counterfactuals could be more useful. An inherent challenge is that the search space of counterfactuals might be exponential in size. Hence, building efficient search algorithms is required.
+
+
+
+The major application is finding counterfactual examples for molecules in related tasks. The method \textbf{MMACE} \cite{agnostic-counter} finds counterfactuals for molecules.
+In the corresponding graph classification problem, it aims to classify a molecule based on a specific property. Examples include whether a molecule will permeate blood brain barrier and molecule's solubility.
+The search space can be generated by a method called \textit{Superfast Traversal, Optimization, Novelty, Exploration and Discovery (STONED)} \cite{nigam2021beyond}. MMACE uses this method to generate the close neighbourhood and searches with a BFS-style algorithm to find an optimal set of counterfactuals.
+
+
+
+Similarly, \textbf{MEG} \cite{meg-counter} also aims to find a counterfactual and the search space consists of molecules. However, instead of searching the space with traditional graph search algorithms, MEG uses a reinforcement learning-based approach to navigate the search space more efficiently. The reward for finding a counterfactual is defined as the inverse of the probability that the candidate molecule found by the agent is not a counterfactual. This method is applied in a classification problem of predicting toxicity of a molecule as well as in a regression problem of predicting solubility of a molecule.
+
+Another approach \textbf{GCFExplainer} \cite{Global-counter} uses a random walk-based method to search the counterfactual space. The objective is not to find an individual counterfactual for each input sample but to find a small set of counterfactuals that explain all or a subset of the input samples. Hence, this is a global method (see Sec. \ref{sec::global}). Here the counterfactual search space is obtained by applying graph edit operations on the training data. The method uses a  random walk called \textbf{Vertex Reinforced Random Walk (VRRW)} \cite{pemantle1992vertex}, which is a modified version of a Markov chain where the state transition probabilities depend on the number of previous visits to that state.
+
+%Another approach \textbf{GCFExplainer} \cite{Global-counter} uses a special kind of random walk to search the counterfactual space. The objective in this method is not to find an individual counterfactual for each input sample but to find a group of counterfactuals that can explain any set of input samples. Hence, this is a Global Counterfactual method \ref{sec::global} Here the counterfactual search space is obtained by applying graph edit operations on training data. The random walk used here is called \textbf{Vertex Reinforced Random Walk (VRRW)} \cite{pemantle1992vertex}, which is a slightly modified version of a Markov chain where the state transition probabilities depend on the number of previous visits to that state.
+
+
+% We also describe other works in which the methods do not fit into any of the above categories.\\
+
+Both \textbf{MMACE} \cite{agnostic-counter} and \textbf{MEG} \cite{meg-counter} are developed for GNNs that predict molecular properties while the objective of \textbf{GCFExplainer} \cite{Global-counter} is to generate global explanations. However, the search algorithms and the generation mechanisms of the counterfactual space are quite different. For instance, MMACE employs a graph search algorithm to locate the nearest counterfactual instance. In contrast, MEG utilizes reinforcement learning, and GCFExplainer employs random walks to achieve the same goal.
+
+%For instance, \textbf{MMACE} \cite{agnostic-counter} uses a simple graph search algorithm to find the closest counterfactual and \textbf{MEG} \cite{meg-counter} uses reinforcement learning while \textbf{GCFExplainer} \cite{Global-counter} uses random walk for the same.
+
+\begin{table}[tb]
+\vspace{-3mm}  
+\centering
+  \scriptsize
+  \caption{Key highlights of \textit{search-based} methods for counterfactuals}
+    \begin{tabular}{ccccc}
+    \toprule
+        \textbf{Method} & \textbf{Explanation Type} & \textbf{Downstream Task} & \textbf{Counterfactual Similarity Metric} & \textbf{Datasets Evaluated}  \\  \midrule
+        MMACE \cite{agnostic-counter} & Instance level & \makecell{Graph classification\\Node classification} & Tanimoto similarity & \makecell{Blood brain barrier dataset \cite{martins2012bayesian}\\Solubility data \cite{sorkun2019aqsoldb}\\HIV drug dataset \cite{meg-counter} } \\  \hline
+        GCFExplainer \cite{Global-counter} & Global & \makecell{Graph classification} & Graph edit distance & \makecell{Mutag \cite{mutag}, NCII \cite{NCI1_data} } \\  \hline
+        MEG \cite{meg-counter} & Instance level & \makecell{Graph classification\\Node classification} & \makecell{Cosine Similarity\\Tanimoto similarity} & \makecell{Tox21 \cite{kersting2016benchmark}, ESOL \cite{moleculenet}} \\  \bottomrule
+    \end{tabular}%
+    \vspace{-3mm}
+  \label{tab::cf-search}%
+\end{table}%
