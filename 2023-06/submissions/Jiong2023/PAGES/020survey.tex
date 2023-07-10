@@ -1,0 +1,100 @@
+\section{Progress for Addressing Heterophily in GNNs}
+
+In this section, we first present a concise overview of effective design strategies proposed to enhance GNN performance under heterophily (\S\ref{sec:progress-designs}), and then discuss the implications of these designs for other GNN research in robustness, fairness, and reducing oversmoothing (\S\ref{sec:progress-connections}).
+\subsection{Effective Designs for Graph Neural Networks on Heterophilous Graphs}
+\label{sec:progress-designs}
+
+We present an overview of the effective design strategies that have been recently proposed to enhance GNN performance on heterophilous graphs. We initiate our discussion with widely adopted designs (D1-D4) in GNN architectures for heterophily, three of which were initially explored in \cite{zhu2020beyond}. Subsequently, we examine two emerging designs (D5-D6) introduced by \citet{yan2022two}, which offer a novel unified approach to address two significant challenges faced by GNNs: oversmoothing and heterophily. Our primary focus in this section is to discuss the design principles and their underlying intuition for improving learning under heterophily without delving into specific models; we direct interested readers to a comprehensive survey by \citet{zheng2022graph} for more details about particular models.
+
+
+
+
+
+\subsubsection{Ego- and Neighbor-embedding Separation}
+\citet{zhu2020beyond} identified three designs for improving the performance of GNNs on heterophilous graphs and provided theoretical justifications.
+At a high level, the first design entails encoding each ego-embedding (i.e., a node's embedding) \textit{separately} from the aggregated embeddings of its neighbors, since they are likely to be dissimilar in heterophily settings. Formally, the representation (or hidden state vector) learned for each node $v$ at GNN layer with depth $k$ is given as:
+\begin{equation}
+        \jV{r}^{(k)}_v = \texttt{{COMBINE}}\left(\jV{r}^{(k-1)}_v, \; \texttt{AGGR}(\{\jV{r}^{(k-1)}_u: u \in {\neighNoSelfLoop(v)}\})\right),
+    \label{eq:design1}
+\end{equation}
+the neighborhood $\neighNoSelfLoop(v)$ does \textit{not} include $v$ (no self-loops), the \texttt{AGGR} function aggregates representations \textit{only} from the neighbors (in some way---e.g., average), and \texttt{AGGR} and \texttt{COMBINE} may be followed by a non-linear transformation.
+For heterophily, after aggregating the neighbors' representations, the definition of \texttt{COMBINE} (akin to `skip connection' between layers) is critical: the ego-embedding and the aggregated neighbor-embedding should be processed by different sets of weight matrices under \texttt{COMBINE}.
+A simple way to combine the ego- and the aggregated neighbor-embeddings without `mixing' them is with concatenation {as in GraphSAGE~\cite{hamilton2017inductive}}---rather than averaging \textit{all} of them as in the GCN model by~\citet{kipf2016semi}. Intuitively, \cite{zhu2020beyond} argues that choosing a \texttt{COMBINE} function that separates the representations of each node $v$ and its neighbors $\neighNoSelfLoop(v)$ allows for more expressiveness, where the skipped or non-aggregated representations can evolve separately over multiple rounds of propagation without becoming prohibitively similar to representations aggregated from neighbors.
+
+While this design was first discussed in \cite{zhu2020beyond} as the most critical design in the context of improving GNN performance under heterophily, 
+it had already been proposed and adopted in prior GNN models such as GraphSAGE~\cite{hamilton2017inductive}, without addressing the problem of heterophily. GCN-Cheby~\cite{defferrard2016convolutional} and MixHop~\cite{MixHop} %
+also feature a variant of this design, with the \texttt{AGGR} function operating on $N(v)$ (with self-loops) instead of $\neighNoSelfLoop(v)$ (no self-loops), while still featuring a separate channel for the ego-embedding.
+Following \method proposed in \cite{zhu2020beyond}, this design has gained wide adaptation for GNNs designed with heterophilous graphs in mind, such as CPGNN~\cite{zhu2021graph}, GPR-GNN~\cite{chien2021adaptive}, FAGCN~\cite{zhang2021beyond}, FSGNN~\cite{zhang2021improving}, JacobiConv~\cite{li2021jacobi}, GGCN~\cite{yan2022two}, GBK-GNN~\cite{du2022gbk}, ACM~\cite{luan2022revisiting}, and OrderedGNN~\cite{song2023ordered}.
+More recently, \citet{platonov2023critical} conducted benchmark experiments on additional heterophilous datasets and showed that GNNs featuring this design, including GAT~\cite{velickovic2018graph} and UniMP~\cite{shi2021masked} modified to include this design, achieve the best results in nearly all cases, which further validates the importance of the ego \& neighbor embedding separation.
+
+\subsubsection{Higher-order Neighborhoods} The second design in \cite{zhu2020beyond} involves explicitly aggregating information from higher-order neighborhoods in each GNN layer, beyond the immediate neighbors of each node: 
+\begin{equation}
+    \jV{r}^{(k)}_v = \texttt{COMBINE}\left(\jV{r}^{(k-1)}_v, \; \texttt{AGGR}_1(\{\jV{r}^{(k-1)}_u: u \in {\bar{N}_1(v)}\}), \; \texttt{AGGR}_2(\{\jV{r}^{(k-1)}_u: u \in {\bar{N}_2(v)}\}), \ldots \right),
+\end{equation}
+
+where $\bar{N}_i(v)$ denotes the neighbors of $v$ at \textit{exactly} 
+$i$ hops away, and the $\texttt{AGGR}_i$ functions applied to different neighborhoods can be the same or different. This design---first employed in GCN-Cheby~\cite{defferrard2016convolutional} and MixHop~\cite{MixHop}---augments the \textit{implicit} aggregation over higher-order neighborhoods that most GNN models achieve through multiple layers of first-order propagation based on variants of Eq.~\eqref{eq:design1}. 
+\citet{zhu2020beyond} attribute the effectiveness of this design to observations that even though the immediate neighborhoods may be heterophilous, the higher-order neighborhoods may show homophily in certain datasets (e.g., binary attribute prediction on 2-partite graphs~\cite{altenburger2018monophily,chin2019decoupled}) and thus provide more relevant context to GNNs. 
+
+Early implementations of this design, such as GCN-Cheby~\cite{defferrard2016convolutional} and MixHop~\cite{MixHop}, extract embeddings from higher-order neighborhoods $\bar{N}_i(v)$ within each layer by employing ``Delta Operators''~\cite{MixHop}. These operators differentiate the aggregated embeddings in different orders of the (normalized) adjacency matrices $\matA^{i}$ and $\matA^{i-1}$ for improved computational efficiency. In contrast, \method\cite{zhu2020beyond}, UGCN~\cite{jin2021universal}, TDGNN~\cite{wang2021tree}, and OrderedGNN~\cite{song2023ordered} precisely compute the $i$-hop neighborhoods $\bar{N}_i(v)$ for each node $v$ before applying the $\texttt{AGGR}_i$ functions to prevent mixing nodes from different hops. Notably, the recent approach by \citet{song2023ordered} achieves state-of-the-art classification accuracy on heterophilous datasets by modeling message passing within higher-order neighborhoods using a rooted-tree hierarchy, and aligning segments of variable length in the resulting node embeddings with specific neighborhood orders.
+
+\subsubsection{Combination of Intermediate Representations} The third design proposed in \cite{zhu2020beyond} combines the intermediate representations of each node at the final layer: 
+\begin{equation}
+    \jV{r}^{(\text{final})}_v = \texttt{COMBINE}\left({\jV{r}^{(1)}_v, \jV{r}^{(2)}_v, \ldots}, \jV{r}^{(K)}_v \right).
+\end{equation}
+This approach explicitly captures both local and global information using \texttt{COMBINE} functions that process each representation individually, such as concatenation or LSTM-attention~\cite{XuLTSKJ18-jkn}. This design was initially introduced in jumping knowledge networks~\cite{XuLTSKJ18-jkn} and demonstrated to enhance the representation power of GCNs under \textit{homophily}. Intuitively, each GNN layer gathers information with varying degrees of locality—earlier layers focus on local information, while later layers increasingly capture global information (implicitly, through propagation). Similar to D2 (which models explicit neighborhoods), this design models the distribution of neighbor representations in low-homophily networks more accurately.
+It also allows the class prediction to leverage different neighborhood ranges in different networks, adapting to their structural properties. 
+
+The application of this design is often linked to graph spectral theory: \citet{zhu2020beyond}  provided a theoretical justification for this design from the perspective of graph spectral filtering. Building upon this foundation, GPR-GNN~\cite{chien2021adaptive}, FAGCN~\cite{bo2021beyond}, and ACM~\cite{luan2022revisiting} further enhance GNN performance under heterophily by developing additional graph filters and mixture mechanisms to utilize embeddings generated with varying frequency components at the final layer, in conjunction with this design.
+
+\subsubsection{Similarity-based Attention and Neighbor Discovery}
+The designs identified in \cite{zhu2020beyond} focus on boosting the effectiveness of message passing on heterophilous graphs without modifying the underlying structure. An alternative approach, however, is to go beyond the original graph adjacency and discover additional connections between the nodes in the graph, based on the similarity their original or latent features (e.g., structural embeddings), which replace or augment the original heterophilous structure of the graph in the message passing. 
+Specifically, UGCN~\cite{jin2021universal}, SimP-GCN~\cite{jin2021node}, NL-GNN~\cite{liu2021non}, HOG-GCN~\cite{wang2022powerful} and GPNN~\cite{yang2022graph} update the message-passing graph for GNNs by removing or downweighting the heterophilous edges in the original graph (i.e., edges that connect nodes with dissimilar features or structural embeddings), while introducing newly discovered connections that exhibit strong homophily. 
+On the other hand, Geom-GCN~\cite{Pei2020Geom-GCN} and WRGNN~\cite{suresh2021breaking} leverage for each node both its original graph neighborhood and the derived ``structural neighborhood'' based on proximity of structural node embeddings in order to augment the message passing and aggregation process. 
+
+\subsubsection{Signed Messages \& Gated Kernel}
+In most GNN models~\cite{kipf2016semi,velickovic2018graph}, messages are positively aggregated from neighbors and transformed using a single kernel or weight matrix. However, in heterophilous graphs, this may degrade GNN performance when messages from neighbors of different classes are mixed~\cite{zhu2020beyond,yan2022two}. Although attention-based GNNs, such as GAT~\cite{velickovic2018graph}, can theoretically reduce aggregation weights on heterophilous edges, they may still accumulate noise in the generated embeddings in practice.
+
+An intuitive solution to address this issue is to learn signed messages (e.g., GGCN~\cite{yan2022two} and GReTo~\cite{zhou2023greto}) or gated kernels (e.g., GBK~\cite{du2022gbk}) that separate message passing between homophilous intra-class and heterophilous inter-class edges. \citet{yan2022two} suggested that ideally, messages from neighbors of a different class should be multiplied by a negative sign (``negative messages''), while messages from neighbors of the same class should remain unchanged. However, ground truth node labels are inaccessible in real scenarios, and any approximated sign function may introduce errors. To identify conditions when signed messages can enhance node classification performance, \cite{yan2022two} introduced the concept of ``error rate'' that quantifies the portion of non-ideal messages and analyzed node classification performance under various error rates and homophily levels.
+The benefits of using signed messages can also be interpreted from the perspective of graph spectrum: signed messages allow negative mixture of certain frequency components~\cite{zhang2021beyond, chien2021adaptive}, helping models better capture high-frequency components in node features. This is especially beneficial for learning on heterophilous graphs as they contain abundant high-frequency components in their node features, unlike homophilous graphs~\cite{zhu2020beyond}.
+
+From the perspective of practical model design, GGCN~\cite{yan2022two} and GReTo~\cite{zhou2023greto} used proximity between node features to approximate the sign function. As an alternative to signed messages, \citet{du2022gbk} proposed a gated bi-kernel design that applies separately to the message passing of homophilous and heterophilous edges, and adopted a learnable gate function to distinguish between the two types of edges based on the node features.
+
+\subsubsection{Degree Corrections}
+Zhu et al.~\cite{zhu2020beyond} first noted that the performance divide between low- and high-degree nodes is exacerbated on heterophilous graphs (c.f. Figure~\ref{fig:h2gcn-degree-acc}). 
+Later, \citet{yan2022two} provided a thorough theoretical and empirical analysis of how the interplay of degrees and homophily levels affects the node classification accuracy. Specifically, two node-level properties were defined: relative degree ${\bar{\theta}_u}$, which evaluates the degree of a node compared to its neighbors' degrees; and node-level homophily $h_u$, which captures the tendency of a node to have the same class as its neighbors. 
+Formally, the relative degree of a node $u$ is defined as ${\bar{\theta}_u}\equiv\mathbb{E}_{\mathbf{A}|d_u}(\frac{1}{d_u} \sum_{v \in N_1(u)} \theta_{uv}|d_u), \text{where } \theta_{uv}\equiv\sqrt{\frac{d_u + 1}{d_v + 1}}$; and the node-level homophily $h_u$ is defined as $h_u \equiv \mathbb{P}(y_u=y_v|v \in N_1(u)).$ 
+The authors discovered that nodes with higher relative degrees outperform the nodes with lower ones under certain conditions of node features when
+the design of signed messages (D5) is employed.
+To improve the performance of nodes with lower relative degrees, they proposed a degree correction strategy which learns to virtually increase the relative degree of the nodes via structure-based edge attention weights $\tau_{uv}^l = \texttt{softplus}\left (\lambda_0^l\left (\tfrac{1}{\theta_{uv}}-1\right )+\lambda_1^l\right )$, where $\lambda_0^l$ and $\lambda_1^l$ are the learnable parameters at the $l$-th GNN layer. If $\theta_{uv}$ is small, a large $\tau_{uv}^l$ is learned, which compensates for the current relative degree.
+
+
+
+
+
+\subsection{Heterophily and Other Objectives of GNN Research}
+\label{sec:progress-connections}
+
+Numerous studies have demonstrated that tackling the limitations of GNNs under heterophily not only enhances their performance on heterophilous datasets, but also improves their properties in other aspects of GNN research. In this section, we provide an overview of the connections that have been investigated between heterophily and adversarial robustness, algorithmic fairness, and oversmoothing, all of which are also important for deployment. 
+
+\paragraph{Heterophily \& Robustness.}
+Recent works have shown that GNNs have a high sensitivity to adversarial attacks~\cite{zugner2018adversarial,dai2018adversarial,xu2019topology,wu2019adversarial,li2020adversarial,ma2020towards}. While most previous works have focused on naturally-occurring heterophily, heterophilous interactions may also be introduced as adversarial noise: 
+as many GNNs exploit homophilous correlations, they can be sensitive to changes that render the data more heterophilous. 
+This relation between adversarial structural attacks and the change of homophily level was first suggested though empirical analyses on homophilous graphs~\cite{wu2019adversarial,jin2020adversarial}, and was later formalized by \citet{zhu2022heterophily} with theoretical and additional empirical analyses. Specifically, \citet{zhu2022heterophily} showed that on homophilous graphs, effective structural attacks lead to increased heterophily, while, on heterophilous graphs, they alter the homophily level contingent on node degrees: 
+for low-degree nodes, attacks increasing the heterophily are still effective, but 
+for high-degree nodes, attacks \emph{decreasing} the heterophily will be effective. 
+By leveraging these relations, the authors further demonstrated that some key architectural designs for effectively handling heterophily---separate aggregators 
+for ego- and neighbor-embeddings (D1) and Combination of Intermediate Representations (D3)---also improve the robustness of GNNs against attacks. 
+Following these relations, a follow-up work proposed a defense framework called CHAGNN that improves the robustness of GNNs against Graph Injection Attacks (GIA) by iteratively pruning the heterophilous edges in the graph and retraining the GNN model~\cite{zhu2023resisting}.
+
+\paragraph{Heterophily \& Fairness.}
+Algorithmic fairness is a critical aspect of machine learning that ensures a model does not disproportionately underperform for certain input classes. In the context of link prediction in networks, fairness is desirable to prevent the prediction accuracy from being influenced by sensitive node attributes, such as race or religion in a social network context. To promote fairness in Graph Neural Networks (GNNs), previous research has suggested learning a fair reweighting or rewiring of the graph structure alongside the parameters of the GNN~\cite{li2021dyadic,spinelli2021fairdrop}. Theoretical analysis has shown that the effectiveness of these approaches depends on the weights of the intergroup edges (essentially, heterophilous edges according to sensitive attribute), along with the group sizes and other structural attributes of the graph.
+For node classification, the global homophily ratio of a graph has revealed to be crucial in providing bounds for group fairness concerning a sensitive attribute~\cite{wang2022improving}. Other research has examined GNN fairness with respect to local homophily ratios within individual node neighborhoods~\cite{loveland2022graph}, revealing that variations in local homophily can impact model fairness, and that GNN designs for heterophily can empirically enhance group fairness.
+
+\paragraph{Heterophily \& Oversmoothing.}
+The oversmoothing problem relates to the degenerated performance of GNNs with an increasing number of layers~\cite{li2018deeper}. 
+Though both the heterophily and oversmoothing problems are associated to the unsatisfactory performance of GNNs, they do not appear to be related at a first glance. However, evidence from both empirical~\cite{chen2020simple, chien2021adaptive} and theoretical analysis~\cite{yan2022two, bodnar2022neural} has found that the two problems may share the same root causes and may be addressed with the same approaches.
+\citet{chen2020simple} addressed the oversmoothing problem via initial residual and identity mapping, but their designs were found empirically to help improve the node classification performance on heterophilous graphs. 
+Vice versa, \citet{chien2021adaptive} addressed the heterophily problem via generalized PageRank, but they showed that their designs are also effective for addressing the oversmoothing problem. 
+\citet{yan2022two} are the first to explicitly analyze the relationship between the two problems. They found that the two problems can be jointly explained by analyzing the changes in the node representations over the layers, and proposed two designs, namely signed messages (D5) and degree corrections (D6), to address the two problems jointly.
+Later, \citet{bodnar2022neural} used cellular sheaves theory to explain the two problems jointly. They found that the underlying geometry of the graph is related to the performance of GNNs in heterophilous settings and their oversmoothing behavior, and many GNNs implicitly assume a graph with a trivial underlying sheaf. These observations and analyses have shown promising results in addressing the two problems jointly, which is an interesting direction to explore further.
