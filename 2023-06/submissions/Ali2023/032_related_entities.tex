@@ -1,0 +1,64 @@
+\section{Use-case: Ranking for Related Entity Search}\label{sec:ali_related_entities}
+%A key aspect of answering user queries in entity-centric experiences is to generate recommendation for other related entities that may be of interest within users' search contexts. For example, given the user query ``How tall is Taylor Swift'', we want to recommend a ranked list of top KG entities that are related to the query entity ``Taylor Swift'' and are aligned with users' search intent, \ie, find the most relevant KG entities that are ``Person'' and have a ``height'' attribute.
+
+% Recommendation generation is a key aspect of answering user queries in entity-centric experiences, and finding related queries and other related entities for a given user query is critical entity-centric experience that can be powered by KGs. For example, given the user query ``How tall is Taylor Swift'', we want to construct queries of the form ``How tall is person?'' for other entities that uses can be interested given the query context. This requires us to find top KG entities that are related to ``Taylor Swift'' (i.e., ranking of KG entities based on their relatedness to the query entity) and align with users' intent (i.e., satisfying predicates in the query context such as their entity type is equal to ``Person'' and they have a non-NULL value for attribute ``height'') 
+\revise{
+Recommendation generation is a key component of question answering in entity-centric user experiences, and the task of providing a ranked list of KG entities related to that of users' query can be performed via fact ranking with KGE models.
+}
+Specifically, given a user query $q=(v_s, r, ?)$, the goal of related entity search is to find a ranking function $\rank{v_r}$ over a subset KG of entities $v_r \in \gR \subseteq \gV$ such that the query $q_r=(v_r, r, ?)$ is relevant to the original query, and $\rank{v_r}$ provides a ranking of each entity $v_r$ based on relatedness to the original query.  
+% The task of finding ranked list of KG entities related to that of users' search context falls within the umbrella of recommendation generation.
+We leverage the KGE models described in the previous sections 
+% One can leverage the modern KGE techniques
+for embedding a KG into a vector space and define \emph{relatedness} between two entities in a KG to be the similarity between their vector representations. Thus, we can use \emph{similarity search over KG embeddings} to find related entities for a given KG entity.
+Depending on the specific application of related entity search, we can use different embedding models. As an example, if we are interested in relatedness in the ontology space of a KG, Poincaré embeddings \cite{poincare} is a suitable model. Otherwise, if we care about relatedness in the whole graph we can use either a shallow (\eg, DistMult \cite{distmult}) or reasoning-based embedding model. 
+
+In addition to the use of KGE-based fact ranking for similarity based relatedness, the task of finding a ranked list of related KG entities for a query requires evaluating additional constraints for aligning answers with users' search intent. 
+For instance, for the query ``How tall is LeBron James'', the goal is to find other ``Person'' entities that are \emph{related} to ``Lebron James'' and have the corresponding fact for the same predicate ``height''. 
+Consequently,
+related entity search use-case goes beyond the traditional vector similarity search and requires batch processing of \emph{hybrid queries}~\cite{mohoney2023high}. Hybrid queries are two part queries consisting of: (i) vector similarity search for retrieving the most similar entities in the embedding space; and (ii) evaluation of conjunction of relational constraints for ensuring the returned results are relevant to search context (\eg, only include ``Person'' entities). 
+\revise{In addition to hybrid query processing, the task of related entity search exhibits following characteristics: (i) hybrid queries are evaluated in a \textbf{batch setting} over past user queries, (ii) and relational predicates in industrial KG workloads exhibit \emph{filter commonality} and \emph{filter stability}~\cite{sun2014fine}, allowing us to customize the system design based on \textbf{available prior workload} characteristics. 
+% These characteristics necessitate new optimizations that are not covered by existing vector similarity search systems (see Section \ref{sec:ali_system}).
+%Consequently, related entity search task imposes additional requirements for fact ranking with KGE models: 
+% In addition to challenges of fact ranking over large-scale KG Performing batch inference for related entity search  has additional requirements due to the unique characteristics of the related entity search task: 
+%(i) hybrid queries and their relational predicates require inference techniques beyond traditional vector similarity search-based solutions, and (ii) the volume and variety of candidate queries that are generated from available prior workloads render static, ``one size fits all'' solutions ineffective. 
+To this end, we employ \hybridindex~\cite{mohoney2023high} hybrid vector similarity search system for  batch inference over KG embeddings and adopt the following suite of optimizations for \textit{high-throughput batch processing of hybrid queries}:
+}
+
+% The batch processing requirement of our workload is in fundamentally different from the existing industrial-scale systems focus on latency optimized online hybrid query processing. Therefore, in contrast to the other fact ranking tasks, our primary challenge here is performing \textit{high-throughput batch processing of hybrid queries} on KG embedding trained for the use-case. The requirements of related entity search use-case necessitate new optimizations that current vector database systems do not cover. To this end, we proposes the following suite of solutions including a \emph{workload-aware vector index} and a \emph{multi-query optimization technique}:
+
+\textbf{Workload-aware vector index:}
+% First, we introduce a new workload-aware index for vector databases.
+Specialized vector indexes that either partition the data or form multi-level indexes over centroids are commonly used in vector databases to speed-up vector similarity search \cite{wang2021milvus}. \hybridindex utilizes the past workload information to guide the partitioning of the vectors in the underlying index in a  way that hybrid queries can be answered by accessing as few partitions as possible. By extending the concept of \emph{query-data routing trees (qd-trees)}~\cite{qd-tree} to vector databases, \hybridindex considers both vectors and relational predicates from a hybrid query workload when generating physical data layout at data loading time. The resulting data layout partitions the vectors using the distribution of the attributes associated with vectors, the attribute constraints, and similarity of vectors present in the hybrid query workload. We then use the resulting partitioning scheme to generate an index layout that enables processing a batch workload of hybrid queries by accessing vectors from as few partitions as possible.
+
+\textbf{Batch query optimization:}
+Second, we use \hybridindex's a multi-query optimization technique that (i) batches queries with similar attribute and vector similarity constraints; and (ii) performs batch vector distance computation against a posting list of vectors obtained from a clustering-based index over the vectors. 
+This optimization is motivated by the fact that the set of candidate queries are computed from past user queries and evaluated in a batch setting, which enables computation sharing across queries.
+% This optimization is motivated by the fact that our target hybrid query workloads need to be evaluated in a batch setting, enabling computation sharing across queries. 
+Note that this optimization is orthogonal to the workload-aware vector index and is applicable to any clustering-based vector index.
+
+We evaluate the performance improvements of these optimizations for related entity search over KG. We use a subset of KG entity embedding vectors, and we focus on ranking related entities for queries of the format \qu{What is the \texttt{[Predicate]} of \texttt{[Entity\_Name]}?}, similar to Section \ref{sec:ali_experiment}. Table \ref{tab:end_to_end} compares the performance of our solution against available existing hybrid query processing strategies (see \cite{mohoney2023high} for more details) using a randomly sampled and aggregated query workload from anonymized, historical queries. \hybridindex and its optimizations provide orders of magnitude performance improvements over best performing baselines for the related entity search task.
+}
+
+% \begin{table}[t]
+% \small
+% \centering
+% 	\caption{Slowdown for related entity search compared to \hybridindex @ Recall $>= .8$}\label{tab:end_to_end}
+% 	\begin{tabular}{| c | c | c | c | c |}
+% 		\hline
+% 		 & \hybridindex & PreFilter & PostFilter & Range \\
+% 		\hline
+% 		\hline
+% 		Slowdown & $1\times$ & $31\times$ & $136\times$ & NA \\
+%         \hline
+% 	\end{tabular}
+% \end{table}
+
+\begin{table}[!t]
+\small
+\centering
+	\caption{Slowdown for related entity search compared to \hybridindex @ Recall $>= .8$}\label{tab:end_to_end}
+\begin{tabular}{lcccc}
+                             & \textbf{HQI} & \textbf{PreFilter} & \textbf{PostFilter} & \textbf{Range} \\ \hline
+\multicolumn{1}{c}{Slowdown} & 1$\times$    & 31$\times$         & 136$\times$         & NA            
+\end{tabular}
+\end{table}

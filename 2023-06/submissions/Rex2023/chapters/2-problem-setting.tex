@@ -1,0 +1,77 @@
+\section{Preliminaries}\label{sec:pre}
+% In this section, we first define the notations used for GNN explanation tasks and introduce the definitions of explanation graphs in different scenarios
+% in Sec.~\ref{sec:notation}. Then we introduce the problem setting of explanation tasks in Sec.~\ref{sec:general_formulation} and  from a generative perspective in Sec.~\ref{sec:generative_formulation}.
+\subsection{Notations and Definitions} \label{sec:notation}
+Given a well-trained GNN model $f$ (\aka base model) and an instance (\ie a node or a graph) of the dataset, the objective of the explanation task is to identify concise graph substructures that contribute the most to the model's predictions. The given graph (or $N$-hop neighboring subgraph of the given node) can be represented as a quadruplet $G(\mathcal{V},\mathcal{E}, \mathbf{X}, \mathbf{E})$, where $\mathcal{V}$ is the node set, $\mathcal{E}\subseteq \mathcal{V}\times \mathcal{V}$ is the edge set. $\mathbf{X}\in\mathbb{R}^{|\mathcal{V}|\times d_n}$ and $\mathbf{V}\in\mathbb{R}^{|\mathcal{E}|\times d_e}$ denote the feature matrices for nodes and edges, respectively, where $d_n$ and $d_e$ are the dimensions of node features and edge features. In this work, we focus on structural explanation, \ie we keep the dimensions of node and edge features unchanged. The notations used throughout this paper are summarized in Table~\ref{tab:notation}. Depending on the specific explanation scenario, we define the explanation graphs with different target labels as follows. 
+\begin{table}[th]
+    \centering
+    \begin{tabular}{c|c}
+    \toprule
+            \textbf{Notation} & \textbf{Description}\\
+            \midrule
+         $G(\mathcal{V},\mathcal{E}, \mathbf{X}, \mathbf{E})$& a graph with nodes $\mathcal{V}$, edges $\mathcal{E}$, node features $\mathbf{X}$ and edge features $\mathbf{E}$ \\
+         $v_j\in \mathcal{V}$ & a graph node\\
+         $e_k\in \mathcal{E}$ & a graph edge\\
+         $G_e$ & an explanation graph\\
+         $G_{ce}$ & a counterfactual explanation graph\\
+         $G_{m}^c$& a model-level explanation graph for the target class $c$ \\
+         $\mathcal{G}=\{G^1, \cdots, G^M\}$ & the graph set of $M$ input instances\\
+         $\mathcal{G}_e=\{G_e^1, \cdots, G_e^M\}$ & the set of $M$ generated explanation graphs\\
+         $ \mathbf{X}=\{X_1, \cdots, X_{|\mathcal{V}|}\}\in\mathbb{R}^{|\mathcal{V}|\times d_n}$ & the node feature matrix with $d_n$ feature dimensions\\
+         $ \mathbf{E}=\{E_1,\cdots, E_{|\mathcal{E}|}\}\in \mathbb{R}^{|\mathcal{E}|\times d_e}$ & the edge feature matrix with $d_e$ feature dimensions \\
+         $A\in\{0,1\}^{|\mathcal{V}|\times |\mathcal{V}|}$ &the unweighted adjacency matrix\\
+         $ \mathcal{Y}$ & the label space\\
+         $ f$ & the well-trained GNN to be explained (base model)\\
+         $ Y^s\in\{0,1,\cdots, |\mathcal{Y}|\}$ & the original label of $s$, where $s$ can be a node or a graph\\
+         $ Y_f(s)\in\{0,1,\cdots, |\mathcal{Y}|\}$ &the predicted label of $s$ by $f$\\
+         $ Y^\ast\in\{0,1,\cdots, |\mathcal{Y}|\}$ & the predicted label during the explanation stage\\
+         $ P_f(s)\in[0,1]^{|\mathcal{Y}|}$ &the output probability vector of $s$ by $f$\\
+         $ f(s)\in\mathbb{R}^{|\mathcal{Y}|}$ & the output logit vector of $s$ by $f$\\
+         $ g_\theta(\cdot): \mathcal{G}\rightarrow \mathcal{G}_e$ & an explanation generator with parameters $\theta$ \\
+         % $ q_\phi(\cdot): \mathcal{G}\rightarrow \mathbf{Z}$ &Encoder network with parameters $\phi$\\
+         % $ p_\theta (\cdot): \mathbf{Z}\rightarrow \mathcal{G}_e$ & Decoder network with parameters $\theta$\\
+         $ p(\cdot| G)$ &the distribution of the explanation graphs for a given $G$\\
+         % $ d(\cdot, \mathcal{G})$ & Function of distance from graph $\mathcal{G}$\\
+         % $d_0; d_l; d_1 $ &input; latent; and final embedding dimension of nodes\\
+         % $ Z\in\mathbb{R}^{|\mathcal{V}|\times d_l}$ & Node latent embedding matrix\\
+         % $ H\in\mathbb{R}^{|\mathcal{V}|\times d_1}$ & Node final embedding matrix\\
+         % $v_i\in\mathcal{V}$& Graph node\\
+         % $\mathbf{Z}$ & Latent space\\
+    \bottomrule
+    \end{tabular}
+    \caption{Summary of the notations}
+    \label{tab:notation}
+\end{table}
+
+\begin{definition}[Explanation Graph]
+Given a well-trained GNN $f$ and an instance represented as $G(\mathcal{V},\mathcal{E},\mathbf{X},\mathbf{V})$, an explanation graph $G_{e}(\mathcal{V}_e,\mathcal{E}_e, \mathbf{X_e}, \mathbf{E_e})$ for the instance is a compact subgraph of $G$, such that $\mathcal{V}_e\subseteq \mathcal{V}$, $\mathcal{E}_e\subseteq \mathcal{E}$, $\mathbf{X_e}=\{X_j|v_j\in \mathcal{V}_e\}$ and $\mathbf{E_e}=\{E_k|e_k\in\mathcal{E}_e\}$, where $v_j$ and $X_j$ denote the graph node and the corresponding node feature, $e_k$ and $E_k$ denote the graph edge and the corresponding edge feature. Explanation graph $G_e$ is expected to be compact and result in the same predicted label $Y^\ast$ as the label of $G$ made by $f$, \ie $Y^\ast = Y_f(G_e)=Y_f(G)$, where $Y_f(\cdot)$ denotes the predicted label made by the model $f$.
+\end{definition}
+
+\begin{definition}[Counterfactual Explanation Graph]
+Given a well-trained GNN $f$ and an instance $G$, a counterfactual explanation graph $G_{ce}$ is as close as possible to the original graph $G$, while it results in a different predicted label $Y^\ast$ with the label of $G$ predicted by $f$, \ie $Y^\ast = Y_f(G_{ce})\neq Y_f(G)$.
+\end{definition}
+
+\begin{definition}[Model-level Explanation Graph]
+Given a set of graph $\mathcal{G}=\{G^1,\cdots, G^M\}$, where each $G^j\in\mathcal{G}$ has the same label $c$ predicted by the well-trained GNN $f$, a model-level explanation graph $G_m^c$ is a distinctive subgraph pattern that commonly appears in $\mathcal{G}$, and is predicted as the same  label $c$, \ie $Y^\ast=Y_f(G_{m}^c)=c$.
+\end{definition}
+
+\subsection{General Explanation for Graph Neural Network}\label{sec:general_formulation}
+Given a graph $G$ and the corresponding label $Y^\ast$ in specific explanation scenarios, generating explanation graphs can be formulated as an optimization problem that maximizes the mutual information between the generated graph and the target label $Y^\ast$ with the following objective:
+\begin{equation}
+\begin{aligned}
+    G^\ast_e &=\argmax_{G_e} MI(Y^\ast, G_e) = \argmax_{G_e} H(Y^\ast)-H(Y^\ast|G_e) \\
+             &=\argmin_{G_e} H(Y^\ast|G_e) = \argmin_{G_e}-\mathbb{E}_{Y^{\ast}|G_e}\log P(Y^\ast| G_e),
+\end{aligned}
+\end{equation}
+where $MI(\cdot, \cdot)$ denotes the mutual information function, $H(\cdot)$ denotes the entropy function, $P(Y^\ast| G_e)$ measures the probability that $G_e$ is predicted as the label $Y^\ast$. 
+
+\xhdr{Instance-dependent Explainers}
+Early efforts develop explanation frameworks for GNNs that optimize an explanation for each individual instance. For example, the Gradient-based methods~\cite{SA-Graph, Grad-CAM-Graph} evaluate the node and edge importance with the gradient norm of prediction \wrt node and edge features. Nodes and edges with higher gradient norms are considered more important and are included in the explanation subgraph of the final prediction. Other methods utilize more advanced frameworks such as mask optimization~\cite{GNNExplainer}, surrogate model~\cite{PGM-Explainer}, and Monte Carlo Tree Search~\cite{SubgraphX} to search the explanation subgraphs for each individual instance.
+
+Although instance-dependent explainers partly reveal the behavior of GNNs, there are several limitations. Since these methods optimize explanations for individual graphs, they require significant computation and lack holistic knowledge about how the GNN model behaves across the entire dataset. Furthermore, the learning modules in instance-dependent explainers cannot be generalized to explain the predictions for unseen instances, since the parameters are specific for individual instances.
+
+% \rex{without training?}
+
+% \rex{a bit vague. we should emphasize that such approaches require an optimization to generate explanation for every unseen instance}
+% \rex{This is vague to the reader. we need to explain what do we mean by well-trained. do we have guidance to explainability effectiveness with respect to GNN performance? we can refer to it in experiments. we can discuss this after the definition}
+% \rex{what does this mean? the label of an instance? maybe define with symbols?}
