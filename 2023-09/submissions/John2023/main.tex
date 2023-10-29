@@ -1,0 +1,576 @@
+\documentclass[11pt]{article}
+\usepackage{deauthor}
+\usepackage{enumitem}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{xcolor}
+\usepackage{xspace}
+\usepackage{graphicx}
+%\usepackage[caption=false]{subfig}
+\usepackage{footnote}
+\usepackage{hyperref}
+\usepackage{multirow}
+\usepackage{subfig}
+\usepackage{enumitem}
+\usepackage{comment}
+
+\usepackage{dsfont}
+\usepackage{wrapfig}
+\usepackage{amssymb}
+
+\usepackage{booktabs} % For formal tables
+
+%\usepackage{etoolbox}
+%\apptocmd{\thebibliography}{\scriptsize}{}{}
+
+%\usepackage{etoolbox}
+%\apptocmd{\thebibliography}{\scriptsize}{}{}
+\usepackage{multirow}
+%\usepackage{graphicx}
+\usepackage{balance}  % for  \balance command ON LAST PAGE  (only there!)
+
+\usepackage{color}
+\usepackage{xcolor}
+\usepackage{amssymb}% http://ctan.org/pkg/amssymb
+\usepackage{pifont}% http://ctan.org/pkg/pifont
+
+\usepackage{pifont}
+\usepackage{url}
+
+\usepackage{booktabs} % For formal tables
+
+\usepackage{enumitem}
+\usepackage{amsmath}
+%\usepackage[linesnumbered,ruled]{algorithm2e}
+% \usepackage[linesnumbered,ruled,vlined]{algorithm2e}
+
+
+\usepackage{graphicx}
+% \usepackage[font=scriptsize]{subfig}
+% \usepackage[font=small,labelfont=bf]{caption}
+%\usepackage{subfigure}
+\usepackage{epsfig}
+
+% For statistical figure
+\usepackage{tikz}
+\usetikzlibrary{snakes}
+
+% \theoremstyle{definition}
+% \newtheorem{definition}{Definition}
+\newcommand{\Hammer}{\emph{iQAN}\xspace}
+\newcommand{\SeqFullName}{Best-First Search\xspace}
+\newcommand{\SeqShortName}{\emph{BFiS}\xspace}
+\newcommand{\KNNS}{$K$-NNS\xspace}
+\newcommand{\DeltaStep}{\emph{$\Delta$-Step}\xspace}
+\newcommand{\PunchStarter}[1]{\noindent\textbf{#1}\xspace}
+
+\definecolor{SeafoamGreen}{RGB}{159, 226, 191}
+\definecolor{Peach}{RGB}{255, 203, 164}
+
+\newcommand{\algoname}{HM-ANN\xspace}
+\newcommand{\name}{HM-ANN\xspace}
+
+\begin{document}
+
+
+\title{Querying Time-Series Data: A Comprehensive Comparison of Distance Measures}
+
+\author{John Paparrizos$^*$, Chunwei Liu$\ddagger$, Aaron J. Elmore$\dagger$, Michael J. Franklin$\dagger$\\
+  $^*$The Ohio State University, paparrizos.1@osu.edu \\
+  $\dagger$University of Chicago \\
+  $\ddagger$Massachusetts Institute of Technology\\
+}
+
+
+\maketitle
+\renewcommand\thesection{\arabic{section}}
+\setcounter{section}{0}
+\setcounter{figure}{0}
+\setcounter{table}{0}
+
+\begin{abstract}
+%In a multitude of scientific and industrial applications, the basis for most data analyses involves the querying of time-series. 
+Distance measures are core building blocks in time-series analysis and the subject of active research for decades. Unfortunately, the most detailed experimental study in this area is outdated (over a decade old) and, naturally, does not reflect recent progress. Importantly, this study (i) omitted multiple distance measures, including a classic measure in the time-series literature; (ii) considered only a single time-series normalization method; and (iii) reported only raw classification error rates without statistically validating the findings, resulting in or fueling four misconceptions in the time-series literature. Motivated by the aforementioned drawbacks and our curiosity to shed some light on these misconceptions, we comprehensively evaluate \textcolor{black}{$71$} time-series distance measures. Specifically, our study includes (i) $8$ normalization methods; (ii) $52$ lock-step measures; (iii) $4$ sliding measures; (iv) $7$ elastic measures; \textcolor{black}{(v) $4$ kernel functions; and (vi) $4$ embedding measures}. We extensively evaluate these measures across $128$ time-series datasets using rigorous statistical analysis. For the most promising measures, we present an accuracy-to-runtime analysis and summarize recent progress on a generalized lower bounding measure that accelerates all elastic distances. Our findings debunk four long-standing misconceptions that significantly alter the landscape of what is known about existing distance measures. With the new foundations in place, we discuss open challenges and promising directions.
+\end{abstract}
+
+
+\section{Introduction}
+\label{john_sec:intro}
+
+%Problem
+The understanding of a multitude of natural or human-made processes involves the analysis of high-dimensional observations over time.  The recording of such time-varying measurements leads in an ordered sequence of data points called {\em time series} \cite{palpanas2015data,paparrizos2018fast}. In the last decades, time-series analysis has become increasingly prevalent, affecting virtually all scientific disciplines and their corresponding industries \cite{UCRArchive2018,liu2023amir,krishnan2019artificial,paparrizos2016detecting,paparrizos2016screening,mckeown2016predicting,goel2016social}. With sensors and devices becoming increasingly networked and with the explosion of Internet-of-Things (IoT) applications, the volume of produced time series is expected to continue to rise \cite{mahdavinejad2017machine,paparrizos2021vergedb,jiang2020pids,jiang2021good,liu2021decomposed}. This growth and ubiquity of time series generates tremendous interest in the extraction of meaningful knowledge from time series \cite{dziedzic2019band,paparrizos2019grail}.
+
+
+% Interesting and Important
+The basis for most analytics over time series involves the detection of similarities between time series. The measurement of similarity, through a {\em distance or similarity measure}, is the most fundamental building block in time-series data mining, fueling tasks such as querying \cite{agrawal1993,ding2008querying,paparrizos2023accelerating,paparrizos2022fast}, indexing \cite{echihabi2018lernaean,Keogh2001locally,zoumpatianos2016ads}, clustering \cite{paparrizos2023odyssey,keogh2005clustering,paparrizos2015k,paparrizos2017fast,bariya2021k}, classification \cite{bagnall2017great,paparrizos2019grail,ratanamahatana2004making,ye2009time}, motif discovery \cite{mueen2009exact,linardi2018scalable,yeh2016matrix}, and anomaly detection \cite{dallachiesa2014top,paparrizos2022tsb,paparrizos2022volume,boniol2021sand,boniol2022theseus,boniol2021sandaction,boniol2023edbt,sylligardos2023choose}. In contrast to other data types where distance measures often process observations independently, for time series, distance measures consider sequences of observations together. This characteristic complicates the definition of distance measures for time series and, therefore, it is desirable to study the factors that determine their effectiveness.
+
+% Why it's hard
+The difficulty in formalizing accurate distance measures stems from the inability to express precisely the notion of similarity. As humans we easily recognize perceptually similar time series, by ignoring a variety of distortions, such as fluctuations, misalignments, and stretching of observations. However, it is challenging to derive definitions to reflect the similarity for mathematically non-identical time series \cite{esling2012time}. Due to that difficulty and the need to handle the variety of distortions, dozens of distance measures have been proposed \cite{assfalg2006similarity,berndt1994using,chen2004marriage,chen2005robust,chen2007spade,ding2008querying,Faloutsos1994fast,frentzos2007index,morse2007efficient,stefan2013move,vlachos2002discovering,paparrizos2015k,paparrizos2019grail,sakoe1978dynamic}.
+
+% Why it hasn't been solved / what's wrong
+Despite this abundance of time-series distance measures and their implications in the effectiveness for a multitude of time-series tasks, less attention has been given in their comprehensive experimental validation. Specifically, in the past two decades, only a single comprehensive experimental evaluation has been dedicated to studying the accuracy of 9 influential time-series distance measures over 38 datasets \cite{ding2008querying}. Unfortunately, this study suffers from three main drawbacks: (i) this study omitted multiple distance measures, including one of the most classic measures in the time-series literature, namely, the cross-correlation measure \cite{papoulis1962fourier,bracewell1965pentagram}; (ii) this study considered only a single time-series normalization method; and (iii) this study reported raw classification error rates without performing any rigorous statistical analysis to assess the significance of the findings. Therefore, the analysis is incomplete, and, the findings might not be conclusive. Importantly, this study is now outdated (more than a decade old), and, naturally, it does not reflect recent progress. Considering the previous drawbacks as well as the remarkable interest in time-series analysis, we believe it is critical to revisit this subject.
+
+However, our effort is not only motivated by the necessity to address the aforementioned issues or to extend the previous study with newer datasets and distance measures. Instead, the thorough experimental evaluation of time-series distance measures that we present in this paper is the byproduct of our attempt to challenge four long-standing misconceptions (see $\mathcal{M}1-\mathcal{M}4$ in Section \ref{john_sec:perceptions}) that have appeared in the time-series literature. These misconceptions are concerned with the (i) normalization of time series; (ii) identification of the state-of-the-art distance measure in every category of measures; \textcolor{black}{(iii) performance of the omitted measures against state-of-the-art measures;} and (iv) detection of the most powerful category of measures. Such misconceptions originated from several influential papers \cite{agrawal1993,Faloutsos1994fast,goldin1995similarity,berndt1994using,shieh2008sax}, some of which date back a quarter of a century, and are fueled by recent inconclusive findings \cite{ding2008querying} as well as successive claims in the literature that we discuss later. Considering how widely cited and impactful these papers are, we believe it is risky not to challenge such persistent misconceptions that might disorientate newcomer researchers and practitioners. 
+
+Motivated by the aforementioned issues and our curiosity to shed some light on these misconceptions, we conduct a comprehensive experimental evaluation to validate the effectiveness of \textcolor{black}{ $71$ time-series distance measures. These distance measures belong to five categories: (i) $52$ {\em lock-step} measures, which compare the $i$th point of one time series with the $i$th point of another; (ii) $4$ {\em sliding} measures, which are the sliding versions of lock-step measures when comparing one time series with all shifted versions of the other; (iii) $7$ {\em elastic} measures, which create a non-linear mapping between time series by comparing one-to-many points in order to align or stretch points; (iv) $4$ {\em kernel} measures, which use a function (with lock-step, sliding, or elastic properties) to implicitly map data into a high-dimensional space; and (v) $4$ {\em embedding} measures, which exploit distance or kernel measures indirectly for constructing new representations for time series.} In addition, we consider $8$ normalization methods for time series. %Table \ref{john_tab:studystats}, summarizes our comprehensive evaluation and compares some statistics against the decade-old influential study \cite{ding2008querying}.
+
+We perform an extensive evaluation of these distance measures across $128$ datasets \cite{UCRArchive2018} and compare their classification accuracy obtained from one-nearest-neighbor classifiers ($1$-NN) under both supervised and unsupervised settings. We conduct a rigorous statistical validation of our findings by employing two statistical tests to assess the significance of the differences in classification accuracy when comparing pairs of measures or multiple measures together. In summary, our study identifies (i) normalization methods leading to significant improvements in a number of distance measures; (ii) new lock-step measures that significantly outperform the current state of the art; (iii) an omitted baseline that most highly popular elastic measures do not outperform; and (iv) \textcolor{black}{new elastic and new kernel measures} that significantly outperform the current state of the art. These findings debunk the four long-standing misconceptions and alter the landscape of what is known about existing measures. 
+
+%We take several steps to ensure the reproducibility of our findings and we provide the raw results in an interactive website to ease exploration \cite{TSDistEval2019}. , including using publicly available datasets, making our source code available, and by providing the raw results in an interactive website to ease exploration
+
+
+
+We start with the description of the four misconceptions in the literature (Section \ref{john_sec:perceptions}) and we review the relevant background (Section \ref{john_sec:preliminaries}). Then, we present our contributions: 
+\begin{itemize}[noitemsep,topsep=0pt,parsep=0pt,partopsep=0pt,leftmargin=0.5cm]
+	\item We explore for the first time $8$ normalization methods along $56$ distance measures (Section
+	\ref{john_sec:normalizations}).
+	\item We study $52$ lock-step distance measures (Section
+	\ref{john_sec:lockstep}).
+	\item We investigate $4$ classic sliding measures omitted from every previous evaluation (Section \ref{john_sec:sliding}).
+	\item We compare $7$ elastic measures under supervised and unsupervised settings (Section \ref{john_sec:elastic}).
+	\item We study for the first time $4$ kernel (Section \ref{john_sec:kernel}) and $4$ embedding distance measures (Section \ref{john_sec:embedded}).
+	\item We present an accuracy-to-runtime analysis (Section \ref{john_sec:overall}).
+ 	\item We summarize recent progress towards accelerating the strongest elastic distances via the use of lower bounding measures (Section \ref{john_sec:accelerating}).
+\end{itemize}
+\noindent Finally, we discuss new directions (Section \ref{john_sec:futurework}) and conclude with the implications of our work (Section \ref{john_sec:conclusions}). An earlier version of the paper has been published in ACM SIGMOD 2020 \cite{paparrizos2020debunking}.
+
+\section{The Four Misconceptions}
+\label{john_sec:perceptions}
+
+In this section, we describe four misconceptions that have appeared in the time-series literature. 
+
+These misconceptions have originated in part from several influential papers \cite{agrawal1993,Faloutsos1994fast,goldin1995similarity,berndt1994using,shieh2008sax}. Subsequently, these misconceptions were fueled by a comprehensive study of time-series distance measures \cite{ding2008querying} as well as dozens of subsequent papers in the literature trusting its findings. Even though an extension of this study appeared five years later \cite{wang2013experimental}, this newer version focused on elaborating on the previous results. %This updated version did not include any omitted or newer distance measures neither conducted the missing statistical analysis. 
+Recent studies that have focused on time-series classification \cite{bagnall2017great,lines2015time} performed a statistical analysis of several classifiers, including the distance measures in \cite{ding2008querying,wang2013experimental}. Unfortunately, these studies only considered supervised tuning of necessary parameters, which does not reflect the use of distance measures for similarity search \cite{echihabi2018lernaean}. Importantly, some results in \cite{bagnall2017great} contradict other results in \cite{lines2015time}, which, in turn, validated claims that there is no significant difference between the evaluated elastic measures \cite{ding2008querying,wang2013experimental}. Interestingly, the improved accuracy found for some measures was attributed to the evaluation framework used while otherwise it was claimed to be undetectable \cite{bagnall2017great}. Considering such apparent difficulties in providing conclusive evidence for this important subject, it is not surprising that the following misconceptions have persisted for so long. 
+
+Before we dive into the details, we emphasize that we do not believe or imply that any of these misconceptions were created on purpose. On the contrary, we believe that they are based on evidence, trends, and resources available at the given point in time. We describe the four misconceptions in the form of answers to questions a newcomer researcher would likely identify by studying the literature.
+\newline \textbf{$\mathcal{M}1$: How to normalize time series?} The consensus is to use the $z$-score or $z$-normalization method. Starting with the work of Goldin and Kanellakis \cite{goldin1995similarity}, a follow-up of the two seminal papers for sequence \cite{agrawal1993} and subsequence \cite{Faloutsos1994fast} search in time-series databases, that suggested first to normalize the time series to address issues with scaling and translation, $z$-normalization became the prevalent method to preprocess time series. Despite the proposal of alternative methods the same year \cite{lin1995fast}, the $z$-normalization was subsequently preferred as the suggested transformations are also applicable to the widely popular Fourier representation \cite{agrawal1993,Faloutsos1994fast,rafiei1997similarity}. Due to the ubiquity of $z$-normalization, a valuable resource for time series, the UCR Archive \cite{UCRArchive2018}, offered until recently the datasets in their $z$-normalized form. To the best of our knowledge, no study has ever extensively evaluated normalization methods for time series. We review $8$ approaches in Section \ref{john_sec:normalizations} and study their performance in Sections \ref{john_sec:lockstep} and \ref{john_sec:sliding}.
+\newline \textbf{$\mathcal{M}2$: Which lock-step measure to use?} The consensus is to use the Euclidean distance (ED). ED was the method of choice in the first paper for sequence search in time series \cite{agrawal1993} due to its usefulness in many cases and its applicability over feature vectors. Considering that ED is straightforward to implement, parameter-free, efficient, as well as tightly connected with the Fourier representation and widely supported by indexing mechanisms (in contrast to other $L_p$-norm variants \cite{yi2000fast}), there is no surprise about its popularity. Besides, evidence that with increased dataset sizes, the classification error of ED converges to the error of more accurate measures \cite{shieh2008sax}, justified its use from virtually all current time-series indexing methods \cite{echihabi2018lernaean}. (Our results in Section \ref{john_sec:overall} suggest that classification error of ED may not always converge to the error of more accurate measures, at least not always with the same speed of convergence.) In Section \ref{john_sec:lockstep}, we evaluate $52$ lock-step measures.
+\newline \textbf{$\mathcal{M}3$: Are elastic better than sliding measures?} The answer is currently unknown. Despite the wide popularity of the cross-correlation measure, also known as sliding Euclidean or dot product distance, in the signal and image processing literature \cite{brown1992survey}, cross-correlation has largely been omitted from distance measure evaluations. We believe two factors are responsible for that. First, cross-correlation was considered in the seminal paper \cite{agrawal1993} as a typical similarity measure, but ED was preferred instead because (i) cross-correlation reduces to ED; and (ii) for the aforementioned reasons in $\mathcal{M}2$. Second, in the introduction of Dynamic Time Warping (DTW) \cite{berndt1994using}, an elastic measure, as an alternative to ED a year later, no comparison was performed against cross-correlation, an obvious baseline. Subsequently, virtually all research on that subject focused either on lock-step or elastic measures \cite{esling2012time,echihabi2018lernaean}, with a few exceptions \cite{li1996hierarchyscan,sakurai2005braid,paparrizos2015k}. Interestingly, cross-correlation was not considered as a baseline method in any of the proposed elastic measures \cite{chen2004marriage,chen2005robust,chen2007spade,morse2007efficient,stefan2013move,vlachos2002discovering}, neither in any of the experimental evaluations of distance measures discussed previously \cite{ding2008querying,wang2013experimental,lines2015time,bagnall2017great}. Strangely, cross-correlation was also omitted from many popular surveys \cite{esling2012time,ralanamahatana2005mining}. Therefore, it remains unknown if elastic measures outperform sliding measures. We study $4$ sliding measures in Section \ref{john_sec:sliding} and analyse their performance against elastic measures in Section \ref{john_sec:elastic}.
+\newline \textbf{$\mathcal{M}4$: Is {\em DTW} the best elastic measure?} The general consensus that has emerged is yes. Since the introduction of DTW as a distance measure for time series \cite{berndt1994using}, DTW has inspired the exploration of edit-based distances and it is widely used as the baseline method for this problem \cite{chen2004marriage,chen2005robust,chen2007spade,morse2007efficient,stefan2013move,vlachos2002discovering,lines2015time,paparrizos2015k,bagnall2017great}. It is not uncommon to identify statements even in the abstracts of papers that $1$-NN with DTW is exceptionally difficult to outperform \cite{xi2006fast,petitjean2011global,petitjean2014dynamic,petitjean2016faster}. Such statements have been backed over the years by the aforementioned extensive evaluations, which conclude that (i) the accuracy of other elastic measures is very close to that of DTW \cite{ding2008querying,wang2013experimental}; (ii) there is no significant difference in the accuracy of elastic measures \cite{lines2015time}; and (iii) that it is ``a little embarrassing'' that most classifiers do not outperform $1$-NN with DTW \cite{bagnall2017great}. Therefore, there is little space to doubt that DTW is the best elastic measure. To study that misconception, we validate $7$ elastic measures in Section \ref{john_sec:elastic}.
+
+\textcolor{black}{To complete the analysis and capture recent progress, we also include kernel measures and embedding measures in our evaluation (Sections \ref{john_sec:kernel} and \ref{john_sec:embedded})}. With the detailed presentation of the four misconceptions, we believe we have now convinced the reader that these misconceptions are not based on any personal biases but, instead, have originated naturally along with the evolution of this area. However, it is risky to not challenge their validity, which may result in confusion for newcomer researchers and practitioners and discourage them from tackling problems in that area. Importantly, it is surprising to consider that half a century of scientific progress has not resulted in any significant improvements over ED or the 50-year-old DTW \cite{sakoe1971dynamic}.
+
+Next, we review the relevant background required to validate the accuracy of the normalization methods and distance measures. Even though the efficiency of measures is another important factor of their effectiveness, there are many ways to accelerate each measure, ranging from hardware-aware implementations to algorithmic solutions such as the use of indexing or comparison pruning. We refer the reader to an excellent recent study of data-series similarity search \cite{echihabi2018lernaean}, which shows the level of detail required to only evaluate ED. \textcolor{black}{Therefore, we leave such detailed study for future work but we present an accuracy-to-runtime analysis in Section \ref{john_sec:overall}.}
+
+\vspace*{-0.1cm}
+\section{Preliminaries and background}
+\label{john_sec:preliminaries}
+
+In this section, we review the necessary background for our experimental evaluation.
+\newline \textbf{Terminology and definitions: } We consider a time-series dataset as a set of $n$ real-valued vectors $X=[\vec{x}_1,\ldots,\vec{x}_n]^\top\!\in\!\mathbb{R}^{n \times m}$, where each time series, $\vec{x}_i\!\in\!\mathbb{R}^{m}$, is an $m$-dimensional ordered sequence of data points. From this definition, it becomes clear that we consider {\em univariate} time series of equal length, where each of these points is a scalar. Following the previous evaluations \cite{ding2008querying,wang2013experimental,bagnall2017great}, we consider that the sampling rates of all time series are the same and omit the discrete time stamps. 
+%Finally, the time series in each dataset have equal length, but among datasets, the length varies.
+\newline \textcolor{black}{\textbf{Datasets: } To conduct our extensive evaluation, we use one of the most valuable public resources in the time-series data mining literature, the UCR Time-Series Archive \cite{UCRArchive2018}. This archive contains the largest collection of class-labeled time-series datasets. Currently, the archive consists of $128$ datasets and includes time series from sensor readings, image outlines, motion capture, spectrographs, medical signals, electric devices, as well as simulated time series. Each dataset contains from $40$ to $24,000$ time series, the lengths vary from $15$ to $2,844$, and each time series is annotated with a single label. The majority of the datasets are already $z$-normalized and we apply the same normalization to all datasets.}
+
+The latest version of the archive has deliberately left a small number of datasets containing time series with varying lengths and missing values to reflect the real world. Following the recommendation of the authors of the archive, who performed similar steps to report classification accuracy numbers on the UCR archive website \cite{UCRArchive2018}, we resample shorter time series to reach the longest time series in each dataset and we fill missing values using linear interpolation. Through these steps, we make the new datasets compatible with previous versions of the archive \cite{UCR2018Fixes}.
+\newline \textbf{Evaluation framework: } Following the previous studies \cite{ding2008querying,bagnall2017great}, we also employ the $1$-NN classifier in our evaluation framework, with important differences. $1$-NN classifiers are suitable methods for distance measure evaluation for several reasons \cite{ding2008querying}. Specifically, $1$-NN classifiers: (i) resemble the problem solved in time-series similarity search \cite{echihabi2018lernaean}; (ii) are parameter-free and easy to implement; (iii) dependent on the choice of distance measure; and (iv) provide an easy-to-interpret (classification) accuracy measure, which captures if the query and the nearest neighbor belong to the same class. 
+
+A critical step for the effectiveness of classifiers is the splitting of a dataset into training and test sets. Previous studies \cite{ding2008querying,wang2013experimental,bagnall2017great} used the $k$-cross-validation resampling procedure, which produces $k$ groups of time series, tunes necessary parameters on the $k-1$ groups, and evaluates the distance measures using the group of time series left. Strangely, \cite{ding2008querying,wang2013experimental} tuned parameters only on a single group and evaluated the distance measures using the $k-1$ groups, which contradicts the common practice. In \cite{bagnall2017great}, the improved accuracy of some measures is attributed to such a resampling procedure, while otherwise, it was claimed to be undetectable. Therefore, to eliminate biases from resampling, we respect the split of training and test sets provided by the UCR archive as well as the class distribution in the datasets (i.e., some datasets contain the same number of time series in each class while other datasets contain imbalanced classes). This decision makes our evaluation framework deterministic and enables reproducibility. Refer to \cite{paparrizos2020debunking}  for further details on our evaluation settings.
+
+%More formally, given a matrix $F=[\vec{f}_1,\ldots,\vec{f}_p]^\top\!\in\!\mathbb{R}^{p \times m}$ with the $p$ time series in the training set, a matrix $G=[\vec{g}_1,\ldots,\vec{g}_r]^\top\!\in\!\mathbb{R}^{r \times m}$ with the $r$ time series in the test set, and any choice of distance measure, $d(\cdot,\!\cdot)$, our $1$-NN classifier relies on two dissimilarity matrixes to produce the final classification accuracy. Specifically, matrix $W\!\in\!\mathbb{R}^{p\times p}$ contains the dissimilarity values between all pairs of time series in the training set, with $W_{ij}=d(\vec{f}_i,\vec{f}_j)\,\forall\,\vec{f}_i,\vec{f}_j\!\in\!F$, whereas matrix $E\!\in\!\mathbb{R}^{r\times p}$ contains the dissimilarity values between each time series in the test set with each time series in the training set, with $E_{ij}=d(\vec{g}_i,\vec{f}_j)\,\forall\,\vec{g}_i\!\in\!G,\,\vec{f}_j\!\in\!F$. 
+%Algorithm \ref{john_alg:1nn} shows the pseudocode of our $1$-NN classifier that evaluates the {\em test} accuracy given a matrix $E$ (as well as vectors $FL$ and $GL$ containing the class labels of $F$ and $G$, respectively). By providing as input, a matrix $W$ (as well as two times the vector $FL$ containing the class labels of $F$), the same algorithm computes the leave-one-out {\em training} accuracy, which enables parameter tuning. With this setup, we decouple the processes of distance matrix computation, parameter tuning, and distance measure evaluation. Importantly, it facilitates easy distribution of the computation of the dissimilarity matrixes for different parameters and avoids the need to find the appropriate $k$ value to perform $k$-cross-validation, which is another factor that might have affected the findings in the previous studies \cite{ding2008querying,bagnall2017great}.
+
+\noindent \textbf{Statistical analysis: } To assess the significance of the differences in accuracy, we employ two statistical tests to validate the pairwise comparisons of measures and the comparisons of multiple measures together. Specifically, following the highly influential \cite{demvsar2006statistical}, we use the Wilcoxon test \cite{wilcoxon1945individual} with a 95\% confidence level to evaluate pairs of measures over multiple datasets, which is more appropriate than the t-test \cite{rice2006mathematical}. As with pairwise tests we cannot reason about multiple measures together and following \cite{demvsar2006statistical}, we also use the Friedman test \cite{friedman1937use} followed by the post-hoc Nemenyi test \cite{nemenyi1963distribution} to compare multiple measures over multiple datasets and report statistical significant results with 90\% confidence level (because these tests require more evidence than Wilcoxon). 
+\newline \textcolor{black}{ \textbf{Availability of code and results: } We implemented the evaluation framework in Matlab, with imported C and Java codes for several distance measures. To ensure the reproducibility of our findings, we make the code available.\footnote{\url{https://github.com/TheDatumOrg/TSDistEval}}}
+\newline \textcolor{black}{ \textbf{Environment: } We ran our experiments on 15 identical servers: Dual Intel(R) Xeon(R) Silver 4116 CPU @ 2.10GHz and 196GB RAM. Each server has 24 physical cores (12 per CPU), which provided us with 360 cores for four months}. 
+
+Next, we start with the study of normalization methods.
+
+\begin{figure*}[t!]
+	\vspace*{-0.3cm}
+	\centering
+	\subfloat[$z$-score]{{\label{john_fig:norm1}}{\includegraphics[height=3cm,width=4.2cm]{submissions/John2023/figures/Normzscore-crop.pdf}
+	}}%
+	%\qquad
+	\subfloat[MinMax]{{\label{john_fig:norm2}}{\includegraphics[height=3cm,width=4.2cm]{submissions/John2023/figures/Normminmax-crop.pdf}
+	}} 
+		\subfloat[UnitLength]{{\label{john_fig:norm3}}{\includegraphics[height=3cm,width=4.2cm]{submissions/John2023/figures/Normunitlength-crop.pdf}
+	}} 
+		\subfloat[MeanNorm]{{\label{john_fig:norm4}}{\includegraphics[height=3cm,width=4.2cm]{submissions/John2023/figures/Normmeannorm-crop.pdf}
+	}} \vspace*{-0.3cm}
+	\qquad
+		\subfloat[MedianNorm]{{\label{john_fig:norm5}}{\includegraphics[height=3cm,width=4.2cm]{submissions/John2023/figures/Normmediannorm-crop.pdf}
+	}} 
+		\subfloat[AdaptiveScaling]{{\label{john_fig:norm6}}{\includegraphics[height=3cm,width=4.2cm]{submissions/John2023/figures/Normadaptive-crop.pdf}
+	}} 
+		\subfloat[Logistic]{{\label{john_fig:norm7}}{\includegraphics[height=3cm,width=4.2cm]{submissions/John2023/figures/Normsigmoid-crop.pdf}
+	}} 
+		\subfloat[Tanh]{{\label{john_fig:norm8}}{\includegraphics[height=3cm,width=4.2cm]{submissions/John2023/figures/Normtanh-crop.pdf}
+	}} 
+	\vspace*{-0.2cm}
+	\caption{Example of how each of the $8$ normalization methods transforms time series of ECGFiveDays \cite{UCRArchive2018}.}%
+    %\vspace*{-0.2cm}
+	\label{john_fig:normalizations}%
+\end{figure*}
+
+%\vspace*{-0.1cm}
+\section{Time-Series Normalizations}
+\label{john_sec:normalizations}
+In this section, we review $8$ normalization methods. As we discussed earlier, a critical issue when comparing time series is how to handle a number of distortions that are characteristic of the time series. For complex distortions, sophisticated distance measures are required as offering invariances to such distortions is not trivial, which explains the proliferation of distance measures in the literature. However, in several cases, a simple preprocessing step is generally sufficient, as we see next.
+
+Consider the following two examples \cite{goldin1995similarity}: (i) two products with similar sales patterns but different sales volume; and (ii) temperatures of two days starting at different values but exhibiting the exact same pattern. The first is an example of the difference in {\em scale} between two time series, whereas the second is an example of the difference in {\em translation}. Despite such differences, in many cases, it is useful to recognize the similarity between time series. Formally, for any constants $a$ (scale) and $b$ (translation), linear transformations in time series of the form $a\vec{x}+b$ should not affect their similarity. 
+
+Several methods have been proposed to handle these popular distortions. {\em Normalization} methods transform the data to become normally distributed, whereas {\em standardization} methods place different data ranges on a common scale. In the machine-learning literature, feature {\em scaling} is also used to refer to such methods. In practice, all terms are used interchangeably to refer to some data transformation. 
+
+We consider $8$ popular normalization methods in our study, namely, $z$-score, min-max (MinMax), Mean (MeanNorm), Median (MedianNorm), Unit length (UnitLength), Adaptive scaling (AdaptiveScaling), Logistic or Sigmoid (Logistic), and Hyperbolic tangent (Tanh) normalization. (Please refer to \cite{paparrizos2020debunking} for more details and their mathematical formulas.) Figure \ref{john_fig:normalizations}, shows an example of how each one of the previously described normalization methods transforms a pair of time series from ECGFiveDays \cite{UCRArchive2018}. We observe that in some cases, the differences are only visible in the range of values (e.g., $z$-score vs. UnitLength), but, in others, the visual effect is more distinct (e.g., MinMax, MeanNorm, and AdaptiveScaling). The most unexpected visual effects come from the two non-linear transformations (i.e., Logistic and Tanh). Next, we evaluate $8$ methods along with the $52$ lock-step measures.
+
+\section{Time-Series Lock-Step Distances}
+\label{john_sec:lockstep}
+
+In this section, we study $52$ lock-step measures that have been proposed across different disciplines.
+
+Distance measures provide a numerical value to quantify how distant are pairs of objects represented as points, vectors, or matrixes. Due to the difficulty in formalizing the notion of similarity, as well as the need to handle a variety of distortions and applications, hundreds of distance measures have been proposed in the literature. This proliferation of distance measures across different scientific areas has resulted in multi-year efforts to organize this knowledge into dictionaries \cite{deza2006dictionary} and encyclopedias \cite{deza2009encyclopedia}. 
+
+As it is understandable, not all of these measures are applicable to time-series data. Thankfully, different endeavors have already been conducted to identify appropriate measures for a variety of tasks across different fields \cite{zezula2006similarity,gavin2003statistical}. An influential study \cite{cha2007comprehensive} identified $50$ lock-step distance measures that we adapt in our evaluation of time-series distance measures. We note that a previous study \cite{giusti2013empirical} evaluated a subset of these measures ($45$) using $1$-NN over $42$ datasets from the UCR archive and concluded that there is no significant differences between these lock-step distance measures.
+
+Unfortunately, we identified issues with this study. First, several of the evaluated measures are known to be equivalent to each other and, therefore, they should provide identical classification accuracy results. For example, this is the case for the Euclidean distance and the inner product (or Pearson's correlation), which under $z$-normalization, they should provide the same accuracy numbers. Second, several distance measures were not properly implemented, resulting in using as distance values either the real part of complex numbers or the first value of a normalized vector of the input time series. Therefore, the analysis of these lock-step measures is incomplete, and the findings are inconclusive.
+
+In our study, we have carefully re-implemented all $50$ distance measures from \cite{cha2007comprehensive}. The distance measures belong to $7$ different families of measures: (1) $4$ measures belong to the $L_p$ Minkowski family; (2) $6$ measures belong to the $L_1$ family; (3) $7$ measures belong to the {\em Intersection} family; (4) $6$ measures belong to the {\em Inner Product} family; (5) $5$ measures belong to the {\em Fidelity} family; (6) $8$ measures belong to the $L_2$ family; and (7) $6$ measures belong to the {\em Entropy} family. Apart from these $42$ measures, we also consider the $3$ measures that utilize ideas from multiple other measures ({\em Combinations}) as well as $5$ measures proposed in the survey but not reported in the literature (until that point).
+
+Besides these measures, we also include two measures that have substantial differences from the previous lock-step measures. Specifically, DISSIM \cite{frentzos2007index} defines the distance as a definite integral of the function of time of the ED in order to take into consideration different sampling rates of time series. This computationally expensive operation can be approximated by a modified version of ED that considers in the distance of the $i$th points the $i+1$th points, which is a form of a smoothing operation. Finally, the adaptive scaling distance (ASD), embeds internally the AdaptiveScaling normalization with an inner product measure to compare time series under optimal scaling \cite{chu1999fast,yang2011patterns}. 
+\newline \textbf{Evaluation of lock-step measures: } For all mathematical formulas, we refer the reader to the previous survey \cite{cha2007comprehensive}. We evaluate $52$ distance measures and their combinations with $8$ normalization methods using our $1$-NN classifier over $128$ datasets (see Section \ref{john_sec:preliminaries}). From all combinations of distance measures and normalization methods ($52\cdot8=416$ in total), we observe $14$ measures with some improvement in their average accuracy in contrast to ED and overall $36$ combinations with different normalization methods. However, only about half of these combinations result in statistically significant differences according to the pairwise Wilcoxon test. (Refer to \cite{paparrizos2020debunking} for raw numbers in Table 1.) To better understand the performance of lock-step measures, we also evaluate the significance of their differences in accuracy when considering several distance measures together, using the Friedman test followed by a post-hoc Nemenyi test. Specifically, we perform two analyses: (i) we evaluate different distance measures under the same normalization; and (ii) we evaluate standalone distance measures under different normalizations; Figure \ref{john_fig:zscoremanymeasures} shows the average rank across all datasets of the distance measures, which under $z$-score normalization, outperformed previously ED. The thick line connects measures that do not perform statistically significantly better. We observe that Lorentzian is ranked first (once we ignore the supervised Minkowski), meaning that it performed best in the majority of the datasets. All $5$ measures significantly outperform ED, but we observe no difference between them. Figure \ref{john_fig:lorentziandifferentnorms} evaluates a standalone distance measure, the Lorentzian measure that performed the best previously, with different normalization methods against ED with $z$-score. We observe that the $3$ out of the $4$ combinations that were better than ED under the Wilcoxon test remain better under this statistical analysis, and there is no difference between them.
+
+
+\begin{figure} \centering \begin{tikzpicture}[xscale=3]
+\draw[gray, thick](00.5833, 0) -- (03.5000, 0);
+\foreach \x in {00.5833,01.1667,01.7500,02.3333,02.9167,03.5000}\draw (\x cm,1.5pt) -- (\x cm, -1.5pt);
+\node (Label) at (00.5833,0.2) {\tiny{1}};
+\node (Label) at (01.1667,0.2) {\tiny{2}};
+\node (Label) at (01.7500,0.2) {\tiny{3}};
+\node (Label) at (02.3333,0.2) {\tiny{4}};
+\node (Label) at (02.9167,0.2) {\tiny{5}};
+\node (Label) at (03.5000,0.2) {\tiny{6}};
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.7910,-00.2500) -- ( 02.1051,-00.2500);
+\node (Point) at (01.8410, 0){};  \node (Label) at (0.5,-00.4500){\scriptsize{Minkowski}}; \draw (Point) |- (Label);
+\node (Point) at (01.9437, 0){};  \node (Label) at (0.5,-00.7500){\scriptsize{Lorentzian}}; \draw (Point) |- (Label);
+\node (Point) at (01.9507, 0){};  \node (Label) at (0.5,-01.0500){\scriptsize{Manhattan}}; \draw (Point) |- (Label);
+\node (Point) at (02.4197, 0){};  \node (Label) at (4.0,-00.4500){\scriptsize{ED}}; \draw (Point) |- (Label);
+\node (Point) at (02.0551, 0){};  \node (Label) at (4.0,-00.7500){\scriptsize{DISSIM}}; \draw (Point) |- (Label);
+\node (Point) at (02.0393, 0){};  \node (Label) at (4.0,-01.0500){\scriptsize{Avg $L_{1}$/$L_{\infty}$}}; \draw (Point) |- (Label);
+\end{tikzpicture}
+\vspace{-0.3cm}
+\caption{\textcolor{black}{Ranking of lock-step measures under $z$-score based on the average of their ranks across datasets.}}
+\label{john_fig:zscoremanymeasures}
+\vspace{-0.5cm}
+\end{figure}
+
+\begin{figure} \centering \begin{tikzpicture}[xscale=3]
+\draw[gray, thick](00.7000, 0) -- (03.5000, 0);
+\foreach \x in {00.7000,01.4000,02.1000,02.8000,03.5000}\draw (\x cm,1.5pt) -- (\x cm, -1.5pt);
+\node (Label) at (00.7000,0.2) {\tiny{1}};
+\node (Label) at (01.4000,0.2) {\tiny{2}};
+\node (Label) at (02.1000,0.2) {\tiny{3}};
+\node (Label) at (02.8000,0.2) {\tiny{4}};
+\node (Label) at (03.5000,0.2) {\tiny{5}};
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.9212,-00.2500) -- ( 02.2074,-00.2500);
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](02.1074,-00.4000) -- ( 02.4153,-00.4000);
+\node (Point) at (01.9712, 0){};  \node (Label) at (0.5,-00.6500){\scriptsize{UnitLength}}; \draw (Point) |- (Label);
+\node (Point) at (02.0013, 0){};  \node (Label) at (0.5,-00.9500){\scriptsize{MeanNorm}}; \draw (Point) |- (Label);
+\node (Point) at (02.3653, 0){};  \node (Label) at (4.0,-00.6500){\scriptsize{ED-$z$-score}}; \draw (Point) |- (Label);
+\node (Point) at (02.1574, 0){};  \node (Label) at (4.0,-00.9500){\scriptsize{MinMax}}; \draw (Point) |- (Label);
+\node (Point) at (02.0041, 0){};  \node (Label) at (4.0,-01.2500){\scriptsize{$z$-score}}; \draw (Point) |- (Label);
+\end{tikzpicture}
+\vspace{-0.3cm}
+\caption{\textcolor{black}{Ranking of normalization methods in combination with the Lorentzian distance based on the average of their ranks across datasets. ED uses $z$-score normalization.}}
+\label{john_fig:lorentziandifferentnorms}
+\vspace{-0.2cm}
+\end{figure}
+
+\noindent \textbf{Debunking $\mathcal{M}1$ and $\mathcal{M}2$: } Our evaluation shows clear evidence that normalization methods other than $z$-score can lead to significant improvements, which debunks $\mathcal{M}1$. Even though for standalone measures, we did not observe significant improvements (e.g.,  ED with MeanNorm vs. ED with $z$-score), that does not reject our hypothesis. We note that the majority of the UCR datasets are in their $z$-normalized form and, therefore, for fairness, we $z$-normalized all datasets, which may have limited this analysis. Despite that, we identified two new distance measures, unknown until now, that only under MinMax and MeanNorm methods outperform ED with $z$-score and, importantly, $z$-score is not suitable for them. Normalizations such as MeanNorm, which combines $z$-score and MinMax methods, seems to perform the best for several measures. Similarly, our analysis shows that distance measures other than ED can lead to significant improvements, which debunks $\mathcal{M}2$. We identified $7$ distance measures that significantly outperform ED. We emphasize that no previous study considered different normalization methods in order to challenge $\mathcal{M}1$, and our findings contradict both previous studies \cite{ding2008querying,giusti2013empirical}, which concluded that there is no significant difference in the accuracy of lock-step measures.
+
+Next, we focus on sliding versions of lock-step measures. 
+\vspace*{-0.1cm}
+\section{Time-Series Sliding Distances}
+\label{john_sec:sliding}
+
+We study $4$ variants of cross-correlation, a measure that has largely been omitted from evaluations. 
+
+Starting with the concurrent introduction of lock-step and elastic measures for the problem of time-series similarity search \cite{agrawal1993,Faloutsos1994fast,berndt1994using}, the vast majority of research focused on these two categories of measures (see $\mathcal{M}3$ in Section \ref{john_sec:perceptions}). Cross-correlation, which is similar to convolution, dates back in the 1700s \cite{dominguez2015history} but received practical popularity only after the invention of Fast Fourier Transform (FFT) \cite{cooley1965algorithm}, which dramatically reduced its computational cost. Cross-correlation is one of the most fundamental operations in signal processing \cite{brown1992survey} and, lately, in deep neural networks \cite{lecun1995convolutional,lecun2015deep}. Recently, research focusing on time-series clustering used cross-correlation and achieved state-of-the-art performance for this task \cite{paparrizos2015k,paparrizos2017fast}. However, this work assumed $z$-normalized time series and performed evaluations only against ED and DTW. (Refer to \cite{paparrizos2015k,paparrizos2020debunking} for the mathematical notation.)
+\newline \textbf{Evaluation of sliding measures: } Due to the resemblance of cross-correlation to the sliding version of Pearson's correlation, when time series are $z$-normalized, the majority of the literature assumes this underlying data normalization \cite{paparrizos2015k}. To the best of our knowledge, the performance of cross-correlation as a measure to compare time series under different normalization methods is not well explored. We measure the performance of the combinations of cross-correlation variants with normalization methods. Specifically, from 32 such combinations (i.e., $4$ measures $\times$ $8$ normalizations), we report only those resulted in an average accuracy higher than the one achieved by Lorentzian (with $z$-score followed by UnitLength), the new state-of-the-art lock-step distance measure based on our previous analysis (Section \ref{john_sec:lockstep}). (Refer to \cite{paparrizos2020debunking} for raw numbers and detailed pairwise analysis.)
+
+
+
+\begin{figure} \centering \begin{tikzpicture}[xscale=3]
+\draw[gray, thick](00.6000, 0) -- (03.0000, 0);
+\foreach \x in {00.6000,01.2000,01.8000,02.4000,03.0000}\draw (\x cm,1.5pt) -- (\x cm, -1.5pt);
+\node (Label) at (00.6000,0.2) {\tiny{1}};
+\node (Label) at (01.2000,0.2) {\tiny{2}};
+\node (Label) at (01.8000,0.2) {\tiny{3}};
+\node (Label) at (02.4000,0.2) {\tiny{4}};
+\node (Label) at (03.0000,0.2) {\tiny{5}};
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.5718,-00.2500) -- ( 01.9484,-00.2500);
+\node (Point) at (01.6218, 0){};  \node (Label) at (0.5,-00.4500){\scriptsize{$NCC_{c}$-$z$-score}}; \draw (Point) |- (Label);
+\node (Point) at (01.6218, 0){};  \node (Label) at (0.5,-00.7500){\scriptsize{$NCC_{c}$-UnitLength}}; \draw (Point) |- (Label);
+\node (Point) at (02.2290, 0){};  \node (Label) at (3.5,-00.4500){\scriptsize{Lorentzian-UnitLength}}; \draw (Point) |- (Label);
+\node (Point) at (01.8984, 0){};  \node (Label) at (3.5,-00.7500){\scriptsize{$NCC_{c}$-MinMax}}; \draw (Point) |- (Label);
+\node (Point) at (01.6290, 0){};  \node (Label) at (3.5,-01.0500){\scriptsize{$NCC_{c}$-MeanNorm}}; \draw (Point) |- (Label);
+\end{tikzpicture}
+\vspace{-0.3cm}
+\caption{\textcolor{black}{Ranking of different normalization methods for $NCC_{c}$ based on the average of their ranks across datasets, using Lorentzian with UnitLength as the baseline method.}}
+\label{john_fig:sliding1}
+\vspace{-0.2cm}
+\end{figure}
+
+
+
+
+
+
+
+In addition to these pairwise comparisons, we also evaluate the significance of the differences when considered all together. Figure \ref{john_fig:sliding1} shows the average rank across datasets of five combinations of $NCC_{c}$ with normalization methods. Similarly to the pairwise analysis, we observe that combinations with $z$-score, MeanNorm, and UnitLength normalizations lead to significant improvements according to the Friedman test followed by a post-hoc Nemenyi test to assess the significance of the differences in the ranking. Combinations of $NCC_{c}$ with AdaptiveScaling or MinMax do not achieve significant improvement. We observe that both statistical evaluation approaches lead to similar conclusions.
+
+For completeness, we report another analysis using ED as the baseline instead of the Lorentzian distance (we omit the figure due to space limitation). $NCC_{c}$ in combination with $z$-score, UnitLength, and MeanNorm normalization methods outperform ED but, in contrast to Figure \ref{john_fig:sliding1}, now combinations with AdaptiveScaling and MinMax are also significantly better than ED. This analysis confirms our results in Section \ref{john_sec:lockstep} that the Lorentzian distance (and other $L_{1}$ variants) are more powerful than ED. In addition, our analysis indicates that $NCC_{c}$ outperforms all lock-step measures with all different normalizations, making it a strong baseline method for time-series comparison.
+
+We now turn our focus to elastic measures and their performance against sliding measures.
+
+\section{Time-Series Elastic Measures}
+\label{john_sec:elastic}
+
+In this section, we study $7$ elastic measures, a popular category of measures for time-series comparison.
+
+As discussed earlier, sliding measures find a global alignment by sliding one time series against the other. In contrast, elastic measures create a non-linear mapping between time-series data points to support flexible alignment of different regions. Through this mapping, elastic measures permit time series to ``stretch'' or ``shrink'' their observations to improve time-series matching. Most elastic measures rely on dynamic programming to find this mapping efficiently by defining recursive formulas over a $m$-by-$m$ matrix $M$ that contains in each cell the ED (or some other lock-step measure) between every point of one time series against every point of another time series. In general, the goal of different elastic measures in the literature is to employ different strategies to find a {\em warping path}, $W=\{w_1,\ldots,w_k\}$, with $k\geq m$, a contiguous set of matrix cells that shows the mapping of every point of one time series to one, more, or none of the points of the other time series. To improve the efficiency and the accuracy of elastic measures, it is a common practice to introduce constraints (i.e., parameters) to guide the warping path to visit only a subset of cells in $M$.
+
+The first elastic measure, DTW \cite{sakoe1971dynamic,sakoe1978dynamic}, was proposed as a speech recognition tool and, later, it was introduced in the time-series literature as a suitable approach for time-series comparison \cite{berndt1994using}. DTW finds the warping path that minimizes the distances between all data points. In the original form, DTW is parameter-free, however, many approaches have been proposed to define {\em bands} (i.e., the shape of the subset cells of matrix $M$ that the warping path is permitted to visit) and the {\em width or window} (i.e., size) of the bands. We use the Sakoe-Chiba band \cite{sakoe1978dynamic}, which is the most frequently used in practice \cite{ding2008querying}, and we tune the window $\delta$ using parameters shown in Table 4 of \cite{paparrizos2020debunking}. For example, a value $\delta=10$ indicates a window size $10\%$ of the time-series length. 
+
+The Longest Common Subsequence (LCSS) distance is another type of elastic measure that was derived from the idea of edit-distances for characters. Specifically, LCSS introduces a parameter $\epsilon$ that serves as a threshold to determine when two points of time series should match \cite{andre1997using,vlachos2002discovering}. Similarly to DTW, LCSS also constrains the warping window by introducing an additional parameter $\delta$ \cite{vlachos2002discovering}. Edit Distance on Real sequence (EDR) distance \cite{chen2005robust} is another edit-distance-based measure that similarly to LCSS, uses a parameter $\epsilon$ to quantify the distance of points as $0$ or $1$. EDR also introduces penalties for gaps between matched subsequences. Edit Distance with Real Penalty (ERP) distance \cite{chen2004marriage} bridges DTW and EDR distance measures by more carefully computing the distance between gaps.
+
+Differently than the previous approaches, the Sequence Weighted Alignment model (Swale) \cite{morse2007efficient} proposes a model to compute the similarity of time series using rewards for matching points and penalties for gaps. Apart from a threshold $\epsilon$ parameter, Swale also requires parameters for the reward $r$ and the penalty $p$. The Move–split–merge (MSM) distance \cite{stefan2013move} is another elastic measure based on edit-distance but in contrast to DTW, LCSS, and EDR, MSM is a metric. MSM uses a set of operations to replace, insert, or delete values in time series to improve their matching. Finally, Time Warp Edit (TWE) distance \cite{marteau2008time} is a measure that combines merits from LCSS and DTW. TWE introduces a stiffness parameter $\nu$ to control the warping but at the same point it also penalizes matched points.
+%For each one of these $7$ elastic measures, several variants and extensions have been proposed in the literature. For example, Derivative DTW (DDTW) \cite{gorecki2013using} combines raw time series with their first-order differences (derivatives). Complexity Invariant distance (CID) \cite{batista2014cid} is a weighting scheme to compensate for differences in the complexity of two time series. Finally, Weighted DTW (WDTW) \cite{jeong2011weighted} adds a penalty to the warping path of DTW. All of these approaches describe extensions that can potentially be used in combination with all previously described elastic measures. Importantly, each of these extensions often introduces additional parameters that require tuning. To avoid an explosion of evaluated approaches, we do not include such variants in our analysis. An excellent recent study \cite{bagnall2017great} focusing on time-series classification has evaluated several of these approaches (and did not identify significant improvements from their use). 
+\newline \textbf{Evaluation of elastic vs. sliding measures: } With the introduction of the $7$ elastic measures we are now in position to evaluate their performance against sliding measures, an experiment that has been omitted in all previous studies \cite{ding2008querying,bagnall2017great}. Refer to \cite{paparrizos2020debunking} for detailed raw numbers and pairwise comparisons under supervised and unsupervised settings.
+
+\begin{figure} \centering \begin{tikzpicture}[xscale=3]
+\draw[gray, thick](00.3750, 0) -- (03.0000, 0);
+\foreach \x in {00.3750,00.7500,01.1250,01.5000,01.8750,02.2500,02.6250,03.0000}\draw (\x cm,1.5pt) -- (\x cm, -1.5pt);
+\node (Label) at (00.3750,0.2) {\tiny{1}};
+\node (Label) at (00.7500,0.2) {\tiny{2}};
+\node (Label) at (01.1250,0.2) {\tiny{3}};
+\node (Label) at (01.5000,0.2) {\tiny{4}};
+\node (Label) at (01.8750,0.2) {\tiny{5}};
+\node (Label) at (02.2500,0.2) {\tiny{6}};
+\node (Label) at (02.6250,0.2) {\tiny{7}};
+\node (Label) at (03.0000,0.2) {\tiny{8}};
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.2726,-00.2500) -- ( 01.6070,-00.2500);
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.5070,-00.4000) -- ( 01.8414,-00.4000);
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.7065,-00.5500) -- ( 02.0656,-00.5500);
+\node (Point) at (01.3226, 0){};  \node (Label) at (0.5,-00.8500){\scriptsize{MSM}}; \draw (Point) |- (Label);
+\node (Point) at (01.3271, 0){};  \node (Label) at (0.5,-01.1500){\scriptsize{TWE}}; \draw (Point) |- (Label);
+\node (Point) at (01.5570, 0){};  \node (Label) at (0.5,-01.4500){\scriptsize{DTW}}; \draw (Point) |- (Label);
+\node (Point) at (01.7565, 0){};  \node (Label) at (0.5,-01.7500){\scriptsize{EDR}}; \draw (Point) |- (Label);
+\node (Point) at (02.0156, 0){};  \node (Label) at (3.5,-00.8500){\scriptsize{$NCC_c$}}; \draw (Point) |- (Label);
+\node (Point) at (01.9627, 0){};  \node (Label) at (3.5,-01.1500){\scriptsize{LCSS}}; \draw (Point) |- (Label);
+\node (Point) at (01.7914, 0){};  \node (Label) at (3.5,-01.4500){\scriptsize{ERP}}; \draw (Point) |- (Label);
+\node (Point) at (01.7666, 0){};  \node (Label) at (3.5,-01.7500){\scriptsize{Swale}}; \draw (Point) |- (Label);
+\end{tikzpicture}
+\vspace{-0.3cm}
+\caption{\textcolor{black}{Ranking of elastic and sliding distance measures based on the average of their ranks across datasets, using supervised tuning for their parameters.}}
+\label{john_fig:elastic1}
+\vspace{-0.2cm}
+\end{figure}
+
+\begin{figure} \centering \begin{tikzpicture}[xscale=3]
+\draw[gray, thick](00.3333, 0) -- (03.0000, 0);
+\foreach \x in {00.3333,00.6667,01.0000,01.3333,01.6667,02.0000,02.3333,02.6667,03.0000}\draw (\x cm,1.5pt) -- (\x cm, -1.5pt);
+\node (Label) at (00.3333,0.2) {\tiny{1}};
+\node (Label) at (00.6667,0.2) {\tiny{2}};
+\node (Label) at (01.0000,0.2) {\tiny{3}};
+\node (Label) at (01.3333,0.2) {\tiny{4}};
+\node (Label) at (01.6667,0.2) {\tiny{5}};
+\node (Label) at (02.0000,0.2) {\tiny{6}};
+\node (Label) at (02.3333,0.2) {\tiny{7}};
+\node (Label) at (02.6667,0.2) {\tiny{8}};
+\node (Label) at (03.0000,0.2) {\tiny{9}};
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.0840,-00.2500) -- ( 01.1853,-00.2500);
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.5517,-00.2500) -- ( 01.9563,-00.2500);
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.6467,-00.4000) -- ( 01.9980,-00.4000);
+\node (Point) at (01.1340, 0){};  \node (Label) at (0.5,-00.8500){\scriptsize{MSM}}; \draw (Point) |- (Label);
+\node (Point) at (01.1353, 0){};  \node (Label) at (0.5,-01.1500){\scriptsize{TWE}}; \draw (Point) |- (Label);
+\node (Point) at (01.6017, 0){};  \node (Label) at (0.5,-01.4500){\scriptsize{ERP}}; \draw (Point) |- (Label);
+\node (Point) at (01.6967, 0){};  \node (Label) at (0.5,-01.7500){\scriptsize{DTW-10}}; \draw (Point) |- (Label);
+\node (Point) at (01.9480, 0){};  \node (Label) at (3.5,-00.8500){\scriptsize{EDR}}; \draw (Point) |- (Label);
+\node (Point) at (01.9323, 0){};  \node (Label) at (3.5,-01.1500){\scriptsize{LCSS}}; \draw (Point) |- (Label);
+\node (Point) at (01.9063, 0){};  \node (Label) at (3.5,-01.4500){\scriptsize{DTW-100}}; \draw (Point) |- (Label);
+\node (Point) at (01.8437, 0){};  \node (Label) at (3.5,-01.7500){\scriptsize{$NCC_c$}}; \draw (Point) |- (Label);
+\node (Point) at (01.8020, 0){};  \node (Label) at (3.5,-02.0500){\scriptsize{Swale}}; \draw (Point) |- (Label);
+\end{tikzpicture}
+\vspace{-0.3cm}
+\caption{\textcolor{black}{Ranking of elastic and sliding distance measures based on the average of their ranks across datasets, using unsupervised tuning for their parameters.}}
+\label{john_fig:elastic2}
+\vspace{-0.2cm}
+\end{figure}
+
+
+%\textcolor{black}{From Table \ref{john_table:elastic1}, we observe that when parameters are selected under supervised settings (lines with LOOCCV tuning) all elastic measures significantly outperform $NCC_c$ with one exception, the LCSS measure, which marginally outperforms $NCC_c$  but the difference is not statistically significant according to Wilcoxon.} However, the picture is different for the unsupervised scenario. Specifically, we observe that $4$ out of the $7$ elastic measures do not outperform $NCC_c$. Interestingly, LCSS, EDR, and DTW (with $\delta=100$, which resembles an equivalent parameter-free measure to $NCC_c$) are slightly worse. MSM, TWE, and ERP on the other side significantly outperform $NCC_c$ in the unsupervised setting as well. Among all elastic measures, ERP is the only parameter-free measure that achieves significantly better accuracy than $NCC_c$ in both supervised and unsupervised settings.
+
+To understand the performance of elastic measures against $NCC_c$, we evaluate the significance of the differences when considered all together. Specifically, Figure \ref{john_fig:elastic1} shows the average ranks of the elastic measures in the supervised setting and Figure \ref{john_fig:elastic2} shows the average ranks in the unsupervised setting. We observe that even under supervised settings, $4$ out of the $7$ elastic measures, namely, LCSS, ERP, EDR, and Swale, do not achieve significantly better performance than $NCC_c$. The results for MSM, TWE, and DTW, are consistent in both statistical evaluations. For the unsupervised setting, both statistical evaluation approaches agree to an extent. In particular, Figure \ref{john_fig:elastic2} shows clearly that MSM and TWE outperform $NCC_c$. However, the remaining $5$ elastic measures perform similarity to $NCC_c$. \textcolor{black}{To validate our findings, we repeat the analysis (we omit figures due to space limitation) and evaluate the significance of the differences when we consider all elastic measures together (i.e., excluding $NCC_c$). Specifically, we observe that Swale, ERP, EDR, and LCSS do not outperform DTW-10 with statistically significant difference. Interestingly, the supervised LCSS is slightly worse than the unsupervised DTW-10. ERP, which under pairwise evaluation appears to significantly outperform DTW-10, when all measures are considered together, both appear to achieve comparable performance. MSM, TWE, and DTW also perform similarly and all three supervised measures outperform DTW-10. However, under unsupervised settings, MSM and TWE significantly outperform all elastic measures.}
+
+\noindent \textbf{Debunking $\mathcal{M}3$ and $\mathcal{M}4$: } Our comprehensive evaluation shows clear evidence that sliding measures are strong baselines that most elastic measures do not manage to outperform either in supervised or unsupervised settings, which debunks $\mathcal{M}3$. Specifically, from all $5$ elastic measures evaluated in the decade-old study \cite{ding2008querying}, namely, LCSS, Swale, EDR, ERP, and DTW, only DTW significantly outperforms cross-correlation under the supervised scenario. In the unsupervised setting, none of the $5$ measures outperforms cross-correlation and, interestingly, several of them perform slightly worse. This is a remarkable finding, showing that the simplest type of alignment between time series is very effective and it should have served as a baseline method for elastic measures. Only MSM and TWE, two measures that appeared after \cite{ding2008querying} show promising results and outperform cross-correlation with statistically significant differences in both supervised and unsupervised settings. Importantly, MSM is the only method that significantly outperforms DTW under supervised settings (according to Wilcoxon) and, under unsupervised settings, both MSM and TWE significantly outperform DTW (with both statistical tests validating this result). Therefore, there is clear evidence that the widely popular DTW is no longer the best elastic distance measure, which debunks $\mathcal{M}4$. 
+
+%\newline \textbf{Evaluation of elastic measures: } Even though the previous analysis shows some trends about the performance among elastic measures, we repeat the analysis using DTW with $\delta=10$ (DTW-10), a strong elastic measure, for baseline (we omit tables and figures due to space limitation). 
+
+%Table \ref{john_table:elastic2} compares the classification accuracy of elastic measures against DTW with $\delta=10$ (DTW-10). We observe $3$ elastic measures that outperform DTW-10 when parameters are selected under supervision. Specifically, MSM, TWE, and DTW (with LOOCCV tuning) outperform DTW-10 with statistically significant difference. However, LCSS, Swale, and EDR, three supervised elastic measures, achieve comparable performance to DTW-10, an unsupervised measure. As expected, the unsupervised versions of LCSS, Swale, and EDR also do not outperform DTW-10. Interestingly, EDR appears statistically significantly worse than DTW-10 (denoted with \textcolor{NavyBlue}{\ding{74}}). This contradicts the findings of the previous study \cite{ding2008querying}, which concluded that EDR might be potentially slightly better. The unsupervised measures ERP, MSM, and TWE all appear to significantly outperform DTW-10. The DTW-100 version achieves worse performance in terms of average accuracy and, therefore, we do not include it in Table \ref{john_table:elastic2}. However, Wilcoxon suggests that there is no statistically significant differences between the accuracy of DTW-10 and DTW-100.
+
+%To better understand the performance of elastic measures among each other, as before, we also evaluate the significance of the differences when considered all together. Figure \ref{john_fig:elastic3} shows the average ranks among elastic measures in the supervised setting whereas Figure \ref{john_fig:elastic3} shows the average ranks in the unsupervised setting. As before, this analysis contradicts some of the pairwise results in Table \ref{john_table:elastic2}. Specifically, Swale, ERP, EDR, and LCSS do not outperform DTW-10 with statistically significant difference. Interestingly, the supervised LCSS is slightly worse than the unsupervised DTW-10. ERP, which under pairwise evaluation appears to significantly outperform DTW-10, when all measures are considered together, both appear to achieve comparable performance. MSM, TWE, and DTW also perform similarly and all three supervised measures outperform DTW-10. However, the analysis under unsupervised settings show again a different picture (Figure \ref{john_fig:elastic4}). In particular, we observe that MSM and TWE are ranked first, significantly outperforming all other elastic measures.
+\vspace{-0.2cm}
+\section{Time-Series Kernel Measures}
+\label{john_sec:kernel}
+\textcolor{black}{Until now, our analysis focused on three categories of distance measures, namely, lock-step, sliding, and elastic measures, with the goal to provide answers to the four-long standing misconceptions that we discussed in Section \ref{john_sec:perceptions}. Recently, kernel functions \cite{scholkopf1997kernel,scholkopf1998nonlinear}, a different category of similarity measures, have started to receive attention due to their competitive performance \cite{abanda2019review}. In contrast to all previously described measures, kernel functions must satisfy the positive semi-definiteness property (p.s.d) \cite{scholkopf2002learning}. The precise definition is out of the scope of this work (we refer the reader to recent papers for a detailed review \cite{abanda2019review,paparrizos2019grail}) but in simple terms, a function is p.s.d. if the similarity matrix, which contains all pairwise similarity values, has positive eigenvalues. This important property results in convex solutions for several learning tasks involving kernels \cite{cortes1995support}. In this section, we study $4$ representative kernel functions and evaluate their performance against sliding and elastic measures.}
+
+\textcolor{black}{Specifically, the first kernel we consider is the Radial Basis Function (RBF) \cite{cristianini2000introduction}, a general purpose kernel function that internally exploits ED but maps data into a high-dimensional space where their separation is easier. To capture similarities between the shifted versions of time series, \cite{wachman2009kernels} proposed a sliding kernel to consider all possible alignments between time-series. We include a recently proposed variant of this kernel, namely, SINK, that has achieved competitive results to $NCC_c$ and DTW \cite{paparrizos2019grail}. Finally, we include two elastic kernel functions, the Global Alignment Kernel (GAK) \cite{cuturi2011fast} and Dynamic Time Warping Kernel (KDTW) \cite{marteau2014recursive}.}
+
+\noindent \textbf{Evaluation of kernel functions: } \textcolor{black}{Having introduced the $4$ kernel functions, we are now in position to evaluate their performance against sliding and elastic measures. As before, we consider both supervised and unsupervised settings. In the supervised setting, we observe that all kernel functions significantly outperform $NCC_{c}$ with the exception of RBF, which is significantly worse. In the unsupervised settings, KDTW and GAK significantly outperform $NCC_{c}$, as before, but SINK achieves comparable performance without outperforming $NCC_{c}$. To better understand the performance of KDTW and GAK, which appear to be the strongest kernel functions, we also evaluate the significance of the differences when considered together with all elastic and sliding measures. Figure \ref{john_fig:kernel2} presents the results for supervised settings and Figure \ref{john_fig:kernel3} for unsupervised settings. We have omitted elastic measures that based on the earlier analysis did not show competitive results. We observe that GAK achieves comparable performance to DTW under both settings. However, KDTW, significantly outperforms DTW in both unsupervised and superivsed settings. This is in contrast to TWE and MSM measures that were significantly better only under the unsupervised settings. To the best of our knowledge, this is the first time that a kernel function is reported to outperform DTW in both settings.}
+
+\begin{figure} \centering \begin{tikzpicture}[xscale=3]
+\draw[gray, thick](00.8750, 0) -- (03.5000, 0);
+\foreach \x in {00.8750,01.7500,02.6250,03.5000}\draw (\x cm,1.5pt) -- (\x cm, -1.5pt);
+\node (Label) at (00.8750,0.2) {\tiny{1}};
+\node (Label) at (01.7500,0.2) {\tiny{2}};
+\node (Label) at (02.6250,0.2) {\tiny{3}};
+\node (Label) at (03.5000,0.2) {\tiny{4}};
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](02.1104,-00.2500) -- ( 02.2611,-00.2500);
+\node (Point) at (01.7325, 0){};  \node (Label) at (0.5,-00.4500){\scriptsize{KDTW}}; \draw (Point) |- (Label);
+\node (Point) at (02.1604, 0){};  \node (Label) at (0.5,-00.7500){\scriptsize{GAK}}; \draw (Point) |- (Label);
+\node (Point) at (02.6451, 0){};  \node (Label) at (4.0,-00.4500){\scriptsize{$NCC_c$}}; \draw (Point) |- (Label);
+\node (Point) at (02.2111, 0){};  \node (Label) at (4.0,-00.7500){\scriptsize{DTW}}; \draw (Point) |- (Label);
+\end{tikzpicture}
+\vspace{-0.3cm}
+\caption{\textcolor{black}{Ranking of kernel measures based on the average of their ranks across datasets (supervised tuning).}}
+\label{john_fig:kernel2}
+\vspace{-0.3cm}
+\end{figure}
+
+
+\begin{figure} \centering \begin{tikzpicture}[xscale=3]
+\draw[gray, thick](00.7000, 0) -- (03.5000, 0);
+\foreach \x in {00.7000,01.4000,02.1000,02.8000,03.5000}\draw (\x cm,1.5pt) -- (\x cm, -1.5pt);
+\node (Label) at (00.7000,0.2) {\tiny{1}};
+\node (Label) at (01.4000,0.2) {\tiny{2}};
+\node (Label) at (02.1000,0.2) {\tiny{3}};
+\node (Label) at (02.8000,0.2) {\tiny{4}};
+\node (Label) at (03.5000,0.2) {\tiny{5}};
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.6944,-00.2500) -- ( 02.1010,-00.2500);
+\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](02.3538,-00.2500) -- ( 02.5903,-00.2500);
+\node (Point) at (01.7444, 0){};  \node (Label) at (0.5,-00.6500){\scriptsize{MSM}}; \draw (Point) |- (Label);
+\node (Point) at (01.7612, 0){};  \node (Label) at (0.5,-00.9500){\scriptsize{TWE}}; \draw (Point) |- (Label);
+\node (Point) at (02.5403, 0){};  \node (Label) at (4.0,-00.6500){\scriptsize{$NCC_c$}}; \draw (Point) |- (Label);
+\node (Point) at (02.4038, 0){};  \node (Label) at (4.0,-00.9500){\scriptsize{DTW-10}}; \draw (Point) |- (Label);
+\node (Point) at (02.0510, 0){};  \node (Label) at (4.0,-01.2500){\scriptsize{KDTW}}; \draw (Point) |- (Label);
+\end{tikzpicture}
+\vspace{-0.3cm}
+\caption{\textcolor{black}{Ranking of kernel measures based on the average of their ranks across datasets (unsupervised tuning).}}
+\label{john_fig:kernel3}
+\vspace{-0.3cm}
+\end{figure}
+
+\section{Time-Series Embedding Measures}
+\label{john_sec:embedded}
+\textcolor{black}{Previously, we studied approaches that directly exploit a kernel function or a distance measure to compare time series. In this section, we study $4$ embedding measures, which are alternative approaches that employ a similarity measure only to construct new representations \cite{abanda2019review}. These representations are similarity-preserving as the comparison of two representations with ED approximates the comparison of the corresponding original time series with the employed similarity measure.}
+
+\textcolor{black}{We consider $4$ approaches to construct embedding measures (i.e., ED over learned representations). Specifically, we consider the Generic RepresentAtIon Learning (GRAIL) framework, which employs the SINK kernel \cite{paparrizos2019grail}, the Shift-invariant Dictionary Learning (SIDL) method, which preserves alignment between time series \cite{zheng2016efficient}, the Similarity Preserving Representation Learning method (SPIRAL), which employs DTW \cite{lei2017similarity}, and the Random Warping Series (RWS), which preserves the GAK kernel \cite{wu2018random}.}
+%\begin{figure} \centering \begin{tikzpicture}[xscale=2]
+%\draw[gray, thick](00.7000, 0) -- (03.5000, 0);
+%\foreach \x in {00.7000,01.4000,02.1000,02.8000,03.5000}\draw (\x cm,1.5pt) -- (\x cm, -1.5pt);
+%\node (Label) at (00.7000,0.2) {\tiny{1}};
+%\node (Label) at (01.4000,0.2) {\tiny{2}};
+%\node (Label) at (02.1000,0.2) {\tiny{3}};
+%\node (Label) at (02.8000,0.2) {\tiny{4}};
+%\node (Label) at (03.5000,0.2) {\tiny{5}};
+%\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](01.6209,-00.2500) -- ( 01.9092,-00.2500);
+%\draw[decorate,decoration={amplitude=.4mm,segment length=1.5mm,post length=0mm}, very thick, color = black](02.6681,-00.2500) -- ( 02.9949,-00.2500);
+%\node (Point) at (01.3069, 0){};  \node (Label) at (0.5,-00.6500){\scriptsize{GRAIL}}; \draw (Point) |- (Label);
+%\node (Point) at (01.6709, 0){};  \node (Label) at (0.5,-00.9500){\scriptsize{RWS}}; \draw (Point) |- (Label);
+%\node (Point) at (02.9449, 0){};  \node (Label) at (4.0,-00.6500){\scriptsize{SIDL}}; \draw (Point) |- (Label);
+%\node (Point) at (02.7181, 0){};  \node (Label) at (4.0,-00.9500){\scriptsize{SPIRAL}}; \draw (Point) |- (Label);
+%\node (Point) at (01.8592, 0){};  \node (Label) at (4.0,-01.2500){\scriptsize{NCCc}}; \draw (Point) |- (Label);
+%\end{tikzpicture}
+%\vspace{-0.3cm}
+%\caption{\textcolor{black}{Ranking of embedded measures based on the average of their ranks across datasets, using supervised tuning for their parameters.}}
+%\label{john_fig:embedded3}
+%\vspace{-0.3cm}
+%\end{figure}
+\newline \noindent \textbf{Evaluation of embedding measures: } \textcolor{black}{For all approaches, we follow \cite{paparrizos2019grail} and tune required parameters using the recommended  values  from  their  corresponding  papers. We construct representations of same length (100) for fairness. We observe that GRAIL, is the only framework that constructs robust representations that when ED is used for comparison (under the 1-NN settings), it achieves similar performance to NCC$_{c}$, but without significant difference. All other embedding measures perform significantly worse and none of the embedding measures outperform DTW (see detailed raw numbers in \cite{paparrizos2020debunking}. We note, however, that embedding measures (as well as kernel methods), achieve much higher accuracy under different evaluation frameworks (e.g., with SVM classifiers), as shown in \cite{paparrizos2019grail}.}
+
+\section{Accuracy-to-runtime Analysis}
+\label{john_sec:overall}
+
+Until now, we have extensively evaluated distance measures based on their accuracy results. However, it is also important to understand the cost associated with each one of these distance measures. In Figure \ref{john_fig:accuracyruntime}, we summarize the accuracy-to-runtime performance of the most prominent measures. The runtime performance includes only inference time (i.e., evaluation on the testing sets). We observe that ED, and all other lock-step measures (omitted), are the fastest but achieve relatively low accuracy (all these measures have $\mathcal{O}(m)$ runtime cost). NCC$_c$ \cite{paparrizos2015k} and SINK \cite{paparrizos2019grail}, two methods that rely on the classic cross-correlation measure, provide an excellent trade-off between runtime and accuracy in comparison to ED (these measures have $\mathcal{O}(m \log m)$ runtime cost). We also observe that all other elastic or kernel methods require substantially higher runtime costs to achieve comparable accuracy results to $NCC_c$ (these measures have $\mathcal{O}(m^2)$ runtime cost). In particular, only MSM and TWE significantly outperform $NCC_c$ (see Figure \ref{john_fig:elastic2}) but require two orders of magnitude higher runtime cost. Instead, embedding measures, such as GRAIL \cite{paparrizos2019grail}, show great promise as they can achieve high accuracy without sacrificing runtime performance. %Finally, Figure \ref{john_fig:error} suggests that with increasingly larger dataset sizes the classification error of ED may not always converge to the error of more accurate measures, at least not always with the same speed of convergence, which highlights the importance of considering measures other than ED (see Section \ref{john_sec:perceptions}).
+
+
+\begin{figure}[t]
+	\vspace*{-0.2cm}
+	\centering
+	\includegraphics[height=8cm,width=15cm]{submissions/John2023/runtime-dis-log.pdf}
+	\vspace*{-0.3cm}
+	\caption{\textcolor{black}{Accuracy-to-runtime comparison.}}%
+	\label{john_fig:accuracyruntime}%
+	\vspace*{-0.3cm}
+\end{figure}
+
+\section{Accelerating Elastic Measures}
+\label{john_sec:accelerating}
+
+Despite their promise, elastic distance measures scale quadratically to the length of the time series, as noted earlier. Compared to ED, which has linear complexity, elastic distance measures incur an additional runtime overhead, often between one to three orders of magnitude (see Figure \ref{john_fig:accuracyruntime}). This cost would prevent applications from using elastic measures in large-scale settings. To alleviate this issue, the idea of {\em lower bounding} was developed to filter out unpromising candidates before carrying out the expensive elastic distance measure computation \cite{kim2001index,keogh2005exact,Faloutsos1994fast}. In simple terms, a lower bound (LB) is a fast distance measure that approximates an expensive elastic distance measure and is computed over some summaries of the time series instead of the actual time series. 
+
+A plethora of LBs have been developed for elastic distance measures \cite{kim2001index,keogh2005exact,shen2018accelerating, tan2020fastee,lemire2009faster,tan2019elastic,chen2004marriage}, with the goal to improve their pruning power (i.e., \textit{tightness} of LB). Unfortunately, the research effort on LBs has been disproportionally concentrated on Dynamic Time Warping (DTW) \cite{sakoe1971dynamic,sakoe1978dynamic}, which is the oldest elastic measure with at least eight established LBs (see \cite{paparrizos2023accelerating} for details). In contrast, newer and better-performing elastic distance measures, such as MSM and TWE, have received little attention, and their LBs are performing poorly. Unfortunately, developing LBs is a challenging task. It is unsustainable to expect a similar research effort for each elastic measure. For this reason, a generalized framework, namely GLB, was recently proposed \cite{paparrizos2023accelerating} to accumulate the knowledge from previously developed LBs and eliminate the need for designing separate LBs for each elastic measure. Specifically, GLB outperforms all established LBs across different elastic measures. Figure \ref{john_fig:pruning} shows the improvement in pruning power (i.e., the percentage of
+the true distance computation avoided) achieved by GLB for several popular elastic measures (more details in \cite{paparrizos2023accelerating}). Considering that MSM and TWE are the new state-of-the-art elastic measures, we note that GLB accelerates MSM up to 10$\times$ and TWE up to 26$\times$ in an extensive analysis we performed across 128 datasets \cite{UCRArchive2018}.
+
+\begin{figure}[t]
+	\vspace*{-0.2cm}
+	\centering
+	\includegraphics[height=4cm,width=15cm]{submissions/John2023/figures/selected_pruning.png}
+	\vspace*{-0.3cm}
+	\caption{\textcolor{black}{Comparison of the pruning power of GLB variants against state-of-the-art LBs of several popular elastic measures over 128 datasets. The blue dots above the diagonal indicate datasets over which GLB outperforms the state of the art.}}%
+	\label{john_fig:pruning}%
+	\vspace*{-0.3cm}
+\end{figure}
+
+%Our extensive experimental evaluation debunked four long-standing perceptions about time-series distance measures that, we believe, significantly alter the landscape of what is known about existing distance measures. In summary, we identified (i) normalization methods that in combination with various ---unknown until now--- distance measures lead to significant improvements in accuracy (e.g., Jaccard with MeanNorm and Emanon4 with MinMax distance measures); (ii) new lock-step measures that significantly outperform ED, the current state-of-the-art lock-step measure (e.g., Lorentzian distance); (iii) an omitted baseline, namely, the cross-correlation measure, that most of the highly popular elastic measures do not outperform; and (iv) new elastic measures, namely, MSM and TWE, that significantly outperform DTW, the current state-of-the-art elastic measure.
+
+
+%\noindent \textbf{Better than elastic: } Elastic measures currently hold the title of the most accurate distance measures for time-series comparison. However, new categories of distance measures starting being explored (e.g., kernel functions and embedded measures \cite{abanda2019review}). It remains open if any of these types of measures can significantly outperform elastic measures. 
+
+\section{Future Directions}
+\label{john_sec:futurework}
+
+With the new knowledge in place, several new challenges open that we hope to spark new research directions. Below, we provide three areas that we believe require more attention and can potentially lead to substantial improvements in the entire area of time-series similarity search:
+
+\begin{itemize}[noitemsep,topsep=0pt,parsep=0pt,partopsep=0pt,leftmargin=0.5cm]
+	\item Identifying more accurate normalizations. Our work was the first to study the performance of $8$ normalization methods. We identified multiple distance measures outperforming the previous SOTA measures only when combined with appropriate normalization methods. In our view, inventing a new normalization method that achieves significant accuracy improvements by preprocessing data differently and without changing existing methods and systems would be a breakthrough.
+    \item Tuning parameters, or selecting appropriate distance measures per dataset in an unsupervised manner. Unfortunately, there are no principled methodologies currently for selecting distance measures or tuning their parameters, despite significant recent attention in AutoML for other domains.
+    \item Improving and evaluating the performance of embedding measures. These measures show the most promise based on their runtime-to-accuracy trade-off. To the best of our knowledge and based on our comprehensive study, there are no embedding measures that significantly outperform the most vigorous elastic measures in terms of accuracy. Recent advances in deep neural networks \cite{wang2023seanet} may lead to embeddings that substantially outperform elastic measures. 
+\end{itemize}
+
+\section{Conclusion}
+\label{john_sec:conclusions}
+
+We presented a comprehensive evaluation to validate the performance of $71$ distance measures. Our study debunked four long-standing misconceptions in the time-series literature and established new state-of-the-art results for lock-step, sliding, elastic, kernel, and embedding measures. Our findings prepare the ground for the development of distance measures with implications across time-series analytical tasks. Importantly, our work has implications for general-purpose similarity search problems over high-dimensional data. For example, several similarity search methodologies rely heavily on the concepts of lower bounding to prune unnecessary comparisons \cite{paparrizos2022fast,echihabi2018lernaean}. Similarly to how GLB abstracted the costs of different elastic measures and generalized lower bounds for time series, we believe a similar concept can be applied in the case of lock-step measures (e.g., Euclidean distance) and the corresponding data summarization methods. In addition, our work identified lock-step measures that outperform Euclidean distance and lock-step measures performing exceptionally well only under certain normalizations. However, the literature in the similarity search area has largely focused on developing methods assuming Euclidean distance is the underlying distance measure. Our work may lead to new solutions for the new, better-performing distance measures. Finally, the methodologies presented for constructing embedding measures are sufficiently generic and can complement solutions focusing on learning embeddings from data \cite{wang2023seanet} (e.g., concatenate deep embeddings with our similarity-preserving embeddings or improve deep embeddings by integrating our similarity-preserving embeddings in the loss functions).
+
+{\scriptsize  \noindent \textbf{Acknowledgments: }
+We thank Kaize Wu for his help and useful discussions. This research was supported in part by a Google  DAPA  Research  Award, gifts from NetApp, Cisco Systems, and Exelon Utilities, and an NSF Award CCF-1139158. Results presented in this paper were obtained using the Chameleon testbed supported by the National Science Foundation.}
+
+%\input{text/_s0_abstract}
+%\input{text/_s1_intro}
+%\input{text/_s2_background}
+% \input{text/overview}
+%\input{text/_s3_iqan_design}
+%\input{text/_s4_iqan_eval}
+%\input{text/_s5_hmann}
+%\input{text/_s6_hmann_eval}
+% \input{text/related}
+%\input{text/_s7_trend}
+%\input{text/conclusion}
+%\input{conclusions}
+
+% \begin{thebibliography}{10}
+% \itemsep=1pt
+% \begin{small}
+
+% \bibliography{bib/ref.bib,bib/refnew.bib}
+
+% \end{small}
+% \end{thebibliography}
+
+%\small
+\footnotesize 
+\bibliographystyle{plainnat} % We choose the "plain" reference style
+\bibliography{submissions/John2023/sample-bibliography} % Entries are in the refs.bib 
+
+\end{document}
