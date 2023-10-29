@@ -1,0 +1,29 @@
+\section{Implementation}\label{sec:implementation}
+
+\subsection{NSG Graph}
+
+%starting point. Out degree cap. diameter cap. distance monotonic.
+In order to test search methods, we used the implementation of Navigating Spreading-out Graph (NSG) to build graph indices and then tested our searching performance on them. According to their evaluation, NSG is the state-of-the-art graph-based index method that leads to good performance for the \SeqFullName~\cite{fu2019fast}.
+NSG has several features which are designed to simplify and improve search performance.
+First, NSG is an approximate monotonic search network. A monotonic search network can provide at least one monotonic path for any two vertices that on the path, the distance from the one end to the other is decreasing in monotonic. This approximate monotonicity is important for search method to reduce the lengh of search path.
+Second, NSG sets a soft limit on the out-degrees of vertices in the built graph. In theory, the limit helps reduce the time complexity of searching. In practice, the limit also helps make the workload balance among workers.
+Third, NSG provides an approximate medoid of the given dataset, which is used as the starting point for searching. The medoid is similar to the mean or the centroid of the dataset while it also has to be a data point included in the dataset. Please note that the design of \FullName is not particularly for NSG only, and its observation should be applicable for other graph-based indices that use \SeqFullName as their searching method.
+
+%\subsection{Graph Data Format}
+
+\subsection{Contiguous Local Queues}
+
+On a shared memory mathine, workers local queues are implemented as one large queue divided into several parts and every worker gets its private part as its own local queue. In this way, all local queues are contigous in memory, and it is able to improve the data locality for memory accesses to the queue. 
+Moreover, the precedure of global merging is to be done in place simultaneously.
+First, the last local queue in the sequence is treated as the global queue when do merging. There is no need to assign extra memory for the global queue. It also saves the data movement between the global queue and the last local queue.
+Second, all workers do the global merging simultaneously in a way of balanced binary tree. For example, assume there are 4 workers form $W_0$ to $W_3$. On the first level, $W_0$ and $W_1$ merge their elements into $W_1$, and $W_2$ and $W_3$ merge into $W_3$. on the second level, $W_1$ and $W_3$ merge their elements into $W_3$. As $W_3$'s local queue is the last one in the sequence, it is also the global queue. After that, the merge is finished and the global results are ready in the global queue. The merge on the same level can be done in parallel.
+
+\subsection{Bitvector Visiting Map}
+
+During the search procedure, a visiting map is shared by all workers to indicate if a vertex has been visited so that a vetex will be visited only once.
+In \ShortName, the visiting map is implemented using bits with normal read and write operation, rather than the conventional bytes with the Compare-and-Swap (CAS) operation.
+The benefits of using a bitvector with normal read and write is that 1) it eliminates the overhead of CAS operation, and 2) it provides good data locality for memory access.
+In fact, the data race among the visiting map is benigh, and the CAS operation is not necessary. 
+By using the bitvector, only a negligible amount of additional distance computation will happen and the merging will remove duplicated results eventually, while the the latency performance is improved by at least 10\%. 
+
+\minjia{Sort of covered in the design. Consider to remove this paragrpah.}
