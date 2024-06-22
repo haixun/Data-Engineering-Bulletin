@@ -1,0 +1,510 @@
+\documentclass[11pt]{article}
+\usepackage{deauthor}
+\usepackage{times,graphicx}
+
+% user packages
+\usepackage{todonotes}
+\usepackage{pifont}
+
+\newcommand{\cmark}{\ding{51}}
+\newcommand{\xmark}{\ding{55}}
+\usepackage{multirow}
+\usepackage{booktabs}
+\usepackage{caption,subcaption}
+\usepackage{graphicx}
+\usepackage{xspace}
+\usepackage{url}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+
+\usepackage{bbm}
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{amsmath}
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{xspace}
+\usepackage{todonotes}
+\usepackage{adjustbox}
+\usepackage{authblk}    % return to previous author style
+\usepackage{cleveref}
+\usepackage{makecell}
+% \usepackage{subfigure}
+\usepackage{subcaption}
+\usepackage{multirow}
+\usepackage{epsfig}
+\usepackage{epstopdf}
+\usepackage{bbding}
+
+
+% \usepackage{ulem}
+
+%%% CUSTOM COMMANDS
+\newcommand{\wyd}[1]{{\color{red}{[(WYD): #1]}}}
+\newcommand{\wydd}[1]{\todo[linecolor=cyan,backgroundcolor=cyan!25,bordercolor=cyan,size=\scriptsize]{(WYD): #1}}
+
+\newcommand{\wjdd}[1]{\todo[linecolor=cyan,backgroundcolor=cyan!25,bordercolor=cyan,size=\scriptsize]{(WJD): #1}}
+\newcommand{\wjd}[1]{{\color{cyan}{[(WJD): #1]}}}
+\newcommand{\ch}[1]{{\color{blue}{[(CH): #1]}}}
+\newcommand{\hwx}[1]
+{\todo[linecolor=purple,backgroundcolor=purple!25,bordercolor=purple,size=\scriptsize]{(HWX): #1}}
+
+\newcommand{\chat}{ChatGPT\xspace}
+\newcommand{\advglue}{AdvGLUE\xspace}
+\newcommand{\flip}{Flipkart\xspace}
+\newcommand{\ddx}{DDXPlus\xspace}
+\newcommand{\error}[1]{\textcolor{red}{#1}}
+
+\newcommand{\tabincell}[2]{\begin{tabular}{@{}#1@{}}#2\end{tabular}}
+
+\title{On the Robustness of ChatGPT: An Adversarial and Out-of-distribution Perspective}
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+
+\author{%
+  \textbf{Jindong Wang}$^{1}$\thanks{Contact: jindong.wang@microsoft.com.}, \textbf{Xixu Hu}$^{1,2\ddagger}$\thanks{Equal contribution.}, \textbf{Wenxin Hou}$^{3\dagger}$, \textbf{Hao Chen}$^{4}$, \textbf{Runkai Zheng}$^{1,5}$\thanks{Work done during internship at Microsoft Research Asia.}, \\\textbf{Yidong Wang}$^{6}$, \textbf{Linyi Yang}$^{7}$, \textbf{Wei Ye}$^{6}$, \textbf{Haojun Huang}$^{3}$, \textbf{Xiubo Geng}$^{3}$, \\\textbf{Binxing Jiao}$^{3}$, \textbf{Yue Zhang}$^{7}$, \textbf{Xing Xie}$^{1}$\\
+  $^{1}$Microsoft Research, $^{2}$City University of Hong Kong, $^{3}$Microsoft STCA, \\$^{4}$Carnegie Mellon University, $^{5}$Chinese University of Hong Kong (Shenzhen), \\$^{6}$Peking University, $^{7}$Westlake University
+}
+
+\begin{document}
+
+\maketitle
+
+
+\begin{abstract}
+
+\chat is receiving increasing attention over the past few months.
+While evaluations of various aspects of \chat have been done, its robustness, i.e., the performance to unexpected inputs, is still unclear to the public.
+Robustness is of particular concern in responsible AI, especially for safety-critical applications.
+In this paper, we conduct a thorough evaluation of the robustness of \chat from the adversarial and out-of-distribution (OOD) perspective.
+To do so, we employ the \advglue and ANLI benchmarks to assess adversarial robustness and the Flipkart review and \ddx medical diagnosis datasets for OOD evaluation.
+We select several popular foundation models as baselines.
+Results show that \chat shows consistent advantages on most adversarial and OOD classification and translation tasks.
+However, the absolute performance is far from perfection, which suggests that adversarial and OOD robustness remains a significant threat to foundation models.
+% Further synopsis indicates that prompt is pivotal to the performance of \chat and we present two suggestions for prompt design: adding more detailed instructions and incorporating chain-of-thought methods.
+Moreover, \chat shows astounding performance in understanding dialogue-related texts and we find that it tends to provide informal suggestions for medical tasks instead of definitive answers.
+Finally, we present in-depth discussions of possible research directions.
+
+\end{abstract}
+
+\section{Introduction}
+\label{sec-intro}
+
+Large language models (LLMs), or foundation models~\cite{bommasani2021opportunities}, have achieved significant performance on various natural language process (NLP) tasks.
+Given their superior in-context learning capability~\cite{min2022rethinking}, prompting foundation models has emerged as a widely adopted paradigm of NLP research and applications.
+\chat is a recent chatbot service released by OpenAI~\cite{chatgpt}, which is a variant of the Generative Pre-trained Transformers (GPT) family.
+Thanks to its friendly interface and great performance, \chat has attracted over $100$ million users in two months.
+% By simply inputting prompts, it can generate answers to various NLP tasks.
+
+It is of imminent importance to evaluate the potential risks behind \chat given its increasing worldwide popularity in diverse applications.
+While previous efforts have evaluated various aspects of \chat in law~\cite{choi2023chatgpt}, ethics~\cite{shen2023chatgpt}, education~\cite{khalil2023will}, and reasoning~\cite{bang2023multitask}, we focus on its \emph{robustness}~\cite{bengio2021deep}, which, to our best knowledge, has not been thoroughly evaluated yet.
+Robustness refers to the ability to withstand disturbances or external factors that may cause it to malfunction or provide inaccurate results.
+It is important to practical applications especially the safety-critical scenarios.
+For instance, if we apply \chat or other foundation models to fake news detection, a malicious user might add noise or certain perturbations to the content to bypass the detection system.
+Without robustness, the reliability of the system collapses.
+
+Robustness threats exist in a wide range of scenarios: out-of-distribution (OOD) samples~\cite{wang2022generalizing}, adversarial inputs~\cite{goodfellow2014explaining}, long-tailed samples~\cite{zhang2021deep}, noisy inputs~\cite{natarajan2013learning}, and many others.
+In this paper, we pay special attention to two popular types of robustness: the adversarial and OOD robustness, both of which are caused through input perturbation.
+Specifically, adversarial robustness studies the model's stability to adversarial and imperceptible perturbations, e.g., adding trained noise to an image or changing some keywords of a text.
+On the other hand, OOD robustness measures the performance of a model on unseen data from different distributions of the training data, e.g., classifying sketches using a model trained for art painting or analyzing a hotel review using a model trained for appliance review.
+More background of these robustness is elaborated in \cref{sec-back-robust}.
+
+
+
+\textbf{Zero-shot robustness evaluation.}
+While robustness research often requires training and optimization (e.g., fine-tuning, linear probing, domain adaptation and generalization, \cref{sec-back-robust}), in this work, we focus on \emph{zero-shot} robustness evaluation.
+Given a foundation model, we perform inference directly on the test dataset for evaluation.
+We argue that it becomes more expensive and unaffordable to train, or even load existing (and future, larger) foundation models.
+For instance, the largest Flan-T5 model has $11$ billion parameters~\cite{chung2022scaling}, which is already beyond the capability of most researchers and practitioners.
+Thus, their zero-shot performance becomes important to downstream tasks.
+On the other hand, foundation models are typically trained on huge volumes of datasets with huge amount of parameters, which seems to challenge conventional machine learning theories:
+\begin{center}
+    \emph{Are large foundation models all we need for robustness?}
+\end{center}
+
+\begin{figure}[t!]
+    \centering
+    \includegraphics[width=\textwidth]{submissions/submission4/figures/model_acc_param.pdf}
+    \caption{Robustness evaluation of different foundation models: performance vs. parameter size. Results show that \chat shows consistent advantage on adversarial and OOD classification tasks. However, its absolute performance is far from perfection, indicating much room for improvement.}
+    \label{fig-summary}
+\end{figure}
+
+In this work, we conduct a thorough evaluation of \chat on its adversarial and OOD robustness for natural language understanding tasks.
+It is challenging to select appropriate datasets for evaluating 
+ \chat since it is known to be trained on huge text datasets as of 2021.
+Eventually, we leverage several recent datasets for our evaluation: \advglue~\cite{wang2021adversarial} and ANLI~\cite{nie2019adversarial} for adversarial robustness and two new datasets for OOD robustness: \flip review~\cite{flipkart_2023} and \ddx medical diagnosis datasets~\cite{tchango2022ddxplus}.
+Furthermore, we randomly selected $30$ samples from \advglue to form an adversarial translation dataset to evaluate the translation performance.
+These datasets represent various levels of robustness, thus provide a fair evaluation.
+The detailed information of these datasets are introduced in \cref{sec-dataset}.
+We then select several popular foundation models from Huggingface model hub and OpenAI service\footnote{Huggingface: \url{https://huggingface.co/models}. OpenAI service: \url{https://openai.com/api}.} to compare with \chat.
+In summary, we have $9$ tasks and $2,089$ test examples.
+
+\textbf{Our findings.}
+We perform zero-shot inference on all tasks using these models and \cref{fig-summary} summarizes our main results.
+The major findings of the study include:
+\begin{enumerate}
+    \item What \chat does well: 
+    \begin{itemize}
+        \item \chat shows consistent improvements on most adversarial and OOD classification tasks.
+        \item \chat is good at translation tasks. Even in the presence of adversarial inputs, it can consistently generate readable and reasonable responses.
+        \item \chat is better at understanding dialogue-related texts than other foundation models. This could be attributed to its enhanced ability as a chatbot service, leading to good performance on \ddx dataset.
+    \end{itemize}
+    
+    \item What \chat does not do well:
+    \begin{itemize}
+        \item The absolute performance of \chat on adversarial and OOD classification tasks is still far from perfection even if it outperforms most of the counterparts.
+        \item The translation performance of \chat is worse than its instruction-tuned sibling model text-davinci-003.
+        \item \chat does not provide definitive answers for medical-related questions, but instead offers informed suggestions and analysis. Thus, it can serve as a friendly assistant.
+    \end{itemize}
+
+    % \item Empirical findings of prompt design:
+    % \begin{itemize}
+    %     \item Adding more detailed instructions about the task to the prompts leads to better results.
+    %     \item Incorporating Chain-of-Thought (CoT)~\cite{kojima2022large} methods improves expalanability.
+    % \end{itemize}
+
+    \item Other general findings about foundation models:
+    \begin{itemize}
+        \item Task-specific fine-tuning helps language models perform better on related tasks, e.g., NLI-fine-tuned RoBERTa-L has similar performance to Flan-T5-L.
+        \item Instruction tuning benefits large language models, e.g., Flan-T5-L achieves comparable performance to text-davinci-002 and text-davinci-002 with significantly less parameters.
+    \end{itemize}
+        
+\end{enumerate}
+
+Beyond evaluations, we share more reflections in the discussion and limitation sections, providing experience and suggestions to future research.
+Finally, we open-source our code and results at \url{https://github.com/microsoft/robustlearn} to facilitate future explorations.
+
+
+\section{Background}
+\label{sec-back}
+
+\input{submissions/submission4/sec-background}
+
+\section{Datasets and Tasks}
+\label{sec-dataset}
+
+\subsection{Adversarial Datasets}
+
+We adopt \advglue~\cite{wang2021adversarial} and adversarial natural language inference (ANLI)~\cite{nie2019adversarial} benchmarks for evaluating adversarial robustness.
+\advglue is a modified version of the existing GLUE benchmark~\cite{wang2019glue} by adding different kinds of adversarial noise to the text: word-level perturbation (typo), sentence-level perturbation (distraction), and human-crafted perturbations.
+We adopt $5$ tasks from \advglue: SST-2, QQP, MNLI, QNLI, and RTE.
+Since the test set of \advglue is not public, we adopt its development set instead for evaluation.
+Although \advglue is a classification benchmark, we additionally construct an adversarial machine translation (En $\to$ Zh) dataset,  termed \advglue-T, by randomly selecting $30$ samples from \advglue. 
+
+ANLI is a large-scale dataset designed to assess the generalization and robustness of natural language inference (NLI) models, which was created by Facebook AI Research. It comprises 16,000 premise-hypothesis pairs that are classified into three categories: entailment, contradiction, and neutral. The dataset is divided into three parts (R1, R2, and R3) based on the number of iterations used during its creation, with R3 being the most difficult and diverse.
+Therefore, we select the test set of R3 for evaluating the adversarial robustness of our models.
+% Detailed information of \advglue and ANLI can be found in \cref{append-data-adv}.
+
+\begin{table}[t!]
+\caption{Statistics of test sets in this paper}
+\label{tb-dataset}
+\centering
+% \resizebox{\textwidth}{!}{
+\begin{tabular}{ccccc}
+\toprule
+Area & Dataset & Task & \#Sample & \#Class \\ \midrule
+\multirow{7}{*}{\begin{tabular}[c]{@{}c@{}}Adversarial   \\ robustness\end{tabular}} & SST-2 & sentiment classification & 148 & 2 \\ 
+ & QQP & quora question pairs & 78 & 3 \\ 
+ & MNLI & multi-genre natural language inference & 121 & 3 \\ 
+ & QNLI & question-answering NLI & 148 & 2 \\ 
+ & RTE & textual entailment recognition & 81 & 2 \\ 
+ & ANLI & text classification & 1200 & 3 \\
+ & \advglue-T & machine translation (En $\to$ Zh) & 30 & - \\ 
+ \midrule
+\multirow{2}{*}{\begin{tabular}[c]{@{}c@{}}OOD \\ robustness\end{tabular}} & Flipkart & sentiment classification & 331 & 2 \\ 
+ & DDXPlus & medical diagnosis classification & 100 & 50 \\ \bottomrule
+\end{tabular}
+% }
+\end{table}
+
+
+\subsection{Out-of-distribution Datasets}
+
+We adopt two new datasets\footnote{Considering \chat is reported to be trained on a substantial corpus of internet language data as of 2021, identifying an out-of-distribution dataset poses a difficulty. Furthermore, we concern that previous natural language processing datasets predating 2022 may have been assimilated by \chat, so we only utilize datasets that are recently released.} for OOD robustness evaluation: \flip~\cite{flipkart_2023} and \ddx~\cite{tchango2022ddxplus}.
+\flip is a product review dataset and \ddx is a new medical diagnosis dataset, both of which are released in 2022.
+These two datasets can be used to construct classification tasks.
+We randomly sample a subset of each dataset to form the test sets.
+% Detailed introduction and construction of each test set can be found in \cref{append-data-ood}.
+\cref{tb-dataset} shows the statistics of each dataset.
+
+\emph{Remark:}
+Finding an OOD dataset for large models like \chat is difficult due to the unavailability of its training data.
+Consider these datasets as `out-of-example' datasets since they did not show up in \chat's training data.
+Additionally, distribution shift may happen at different dimensions: not only across domains, but also across time.
+Thus, even if \chat and other LLMs may already use similar datasets like medical diagnosis and product review, our selected datasets are still useful for OOD evaluation due to temporal distribution shift.
+Finally, we must admit the limitation of these datasets and look forward to brand new ones for more thorough evaluation.
+
+
+\section{Experiment}
+
+\subsection{Zero-shot Classification}
+
+\subsubsection{Setup}
+
+We compare the performance of \chat on AdvGLUE classification benchmark with the following existing popular foundation models:
+% RoBERTa-L~\cite{liu2019roberta}, 
+DeBERTa-L~\cite{he2020deberta}, BART-L~\cite{lewis2020bart}, GPT-J-6B~\cite{gpt-j},
+Flan-T5~\cite{raffel2020exploring,chung2022scaling}, 
+% T0~\cite{sanh2021multitask}, 
+GPT-NEOX-20B~\cite{neox20b},
+OPT-66B~\cite{zhang2022opt}, 
+BLOOM~\cite{scao2022bloom}, and GPT-3 (text-davinci-002 and text-davinci-003)~\footnote{Note that the classification task may be unfavorable to the generative models since we did not limit their output space as discriminative models like DeBERTa-L do.}.
+The latter two are from OpenAI API service and the rest are on Hugging face model hub.
+The notation `-L' means `-large', as we only evaluate the large version of these models.
+% The detailed information of these models are introduced in \cref{append-model}.
+
+
+For adversarial classification tasks on \advglue and ANLI, we adopt attack success rate (ASR) as the metric for robustness.
+For OOD classification tasks, F1-score (F1) is adopted as the metric.
+As mentioned before, we only perform zero-shot evaluation.
+Thus, we simply run all models on a local computer with plain GPUs, which could be the case in most downstream applications.\footnote{Even the local computer is not that ``plain'' since it requires at least $1$ A$100$ GPU with $80$ GB of memory.}
+Note that we use the NLI-fine-tuned version of DeBERTa-L and BART-L on natural language inference tasks to perform zero-shot classification since they are not originally designed for text classification.
+For other models, we adopt the prompt-based paradigm to get answers for classification by inputting prompts.
+Note that we manually processed some outputs since the outputs of some generative LLMs are not easy to control.
+
+\input{submissions/submission4/tables/tb-cls-results.tex}
+
+\subsubsection{Results}
+
+The classification results of adversarial and OOD robustness are shown in \cref{tb-results}.
+
+First, \textbf{\chat shows consistent improvements on adversarial datasets.}
+It outperforms all counterparts on all adversarial classification tasks.
+However, we see that there is still room for improvement since the absolute performance is far from perfection.
+For instance, the ASRs on SST-2 and ANLI are $40\%$ and $55.3\%$, respectively, indicating much room for improvement. 
+This could be due to the reason that they are trained on clean corpus and some adversarial texts are washed out from the training data.
+Beyond \chat, it is also surprising to find that most methods only achieve slightly better than random guessing, while some even do not beat random guessing.
+This indicates that the zero-shot adversarial robustness of most foundation models is not promising.
+% Such adversarial vulnerability poses a major threat to various applications of foundation models, which we will further discuss in \cref{sec-discuss-adv} and \cref{append-theory-ml}.
+In addition to foundation models, we are surprised to find that some small models also achieve great performance on adversarial tasks while it has much less parameters than the strong models (e.g, DeBERTa-L on QQP and QNLI tasks).
+This indicate that fine-tuning on relevant tasks can still improve the performance.
+Furthermore, Flan-T5 also achieves comparable performance to most larger models.
+Since Flan-T5 is also trained via instruction tuning, this implies the efficacy of such training approach in prompting-based NLP tasks.
+
+Second, \textbf{all models after GPT-2 (text-davinci-002, text-davinci-003, and \chat) perform well on OOD datasets.}
+This observation is in consistency with recent finding in OOD research that the in-distribution (ID) and OOD performances are positively correlated~\cite{miller2021accuracy}.
+However, \chat and its sibling models perform much better on \ddx, indicating its ability to recognize new or diverse domain data.
+Additionally, some large models performs better, e.g., Flan-T5-L outperforms some larger models such as OPT-66B and BLOOM.
+This can be explained as overfitting on certain large models or they have an \emph{inverse} ID-OOD relation~\cite{teney2022id} on our test sets.
+It should also be noted that the absolute performance of \chat and davinci series are still far from perfection.
+% More discussions on OOD are presented in \cref{sec-discuss-ood} and \cref{append-data-ood} shows some informal analysis from the perspective of OOD theory.
+
+Third, on the \ddx dataset, \textbf{\chat is better at understanding diaglogue-related texts compared with other LLMs.}
+The \ddx benchmark presents a formidable challenge for many models. The majority of models perform at a level akin to random chance, with the exception of the davinci series and \chat, which exhibit exceptional performance.
+One plausible explanation for the superior performance of these three models may be their substantial increase in the number of model parameters.
+% In particular, the models under examination possess a parameter count of 175 billion, substantially surpassing that of the next largest model, OPT-66B, which has a parameter count of 66 billion.
+This substantial increase in parameter count may enable the model to learn more complex representations and subsequently result in an improvement of performance.
+Another possible reason for the success of \chat is its ability to understand the conversational context of \ddx, which consists of doctor-posed diagnostic questions and patient responses.
+\chat has demonstrated superior performance in understanding conversational context compared to previous models, which likely contributes to its improved performance on this dataset.
+
+Finally, it is worth noting that due to the critical nature of the healthcare field, \textbf{\chat does not provide definitive answers in medical-related questions but instead offers informed suggestions and analysis, followed by a recommendation for further offline testing and consultation to ensure accurate diagnosis.}
+When the provided information is insufficient to make a judgment, \chat will acknowledge this and offer an explanation, demonstrating its responsible approach to medical-related inquiries.
+This highlights the benefits of using \chat for medical-related inquiries compared to search engines, as it can provide comprehensive analysis and suggestions without requiring the users to have medical expertise, while also being responsible and cautious in its responses.
+This suggests a promising future for the integration of \chat in computer-aided diagnosis systems.
+
+
+
+\subsection{Zero-shot Machine Translation}
+
+\subsubsection{Setup}
+We further evaluate the adversarial robustness of ChatGPT on an English-to-Chinese (En $\to$ Zh) machine translation task.
+The test set (\advglue-T) is sub-sampled from the adversarial English text in \advglue and we manually translate them into Chinese as ground truth.
+We evaluate the zero-shot translation performance of \chat against text-davinci-002 and text-davinci-003.
+We further adopt two fine-tuned machine translation models from the Huggingface model hub: OPUS-MT-EN-ZH~\cite{tiedemannThottingalEAMT2020} and Trans-OPUS-MT-EN-ZH\footnote{Note that there are only few En $\to$ Zh machine translation models released on Huggingface model hub and we pick the top two with the most downloads.}.
+We report BLEU, GLEU, and METEOR in experiments to conduct a fair comparison among several models.\footnote{We use NLTK (\url{https://www.nltk.org/}) to calculate these metrics.} 
+
+
+\subsubsection{Results}
+
+The results of zero-shot machine translation are shown in \cref{tab:translation}. 
+Note that all three models from the GPT family outperforms the fine-tuned models. 
+Interestingly, text-davinci-003 generalizes the best on all metrics. 
+The performance of ChatGPT is better to text-davinci-002 on BLUE and GLUE, but slightly worse on METOR. 
+While differing in metrics, we find \textbf{the translated texts of ChatGPT (and text-davinci-002 and text-davinci-003) is very readable and reasonable to humans, even given adversarial inputs.}
+This indicates the adversarial robustness capability on machine translation of ChatGPT might originate from GPT-3.
+
+
+
+\begin{table}[htbp]
+\centering
+\caption{Zero-shot machine translation results on adversarial text sampled from AdvGLUE.}
+\label{tab:translation}
+\resizebox{0.5\columnwidth}{!}{%
+\begin{tabular}{@{}c|ccc@{}}
+\toprule
+ Model & BLEU$\uparrow$ & GLEU$\uparrow$ & METOR$\uparrow$ \\ \midrule
+OPUS-MT-EN-ZH & 18.11 & 26.78 & 46.38 \\
+Trans-OPUS-MT-EN-ZH & 15.23 & 24.89 & 45.02 \\
+text-davinci-002 & 24.97 & 36.30 & \underline{59.28} \\ 
+text-davinci-003 & \textbf{30.60} & \textbf{40.01} & \textbf{61.88} \\ 
+\chat & \underline{26.27} & \underline{37.29} & 58.95 \\ 
+ \bottomrule
+\end{tabular}%
+}
+\end{table}
+
+
+\subsection{Case Study}
+
+\cref{tb-adv-example} shows some results of \chat across word-level (typo) and sentence-level (distraction) adversarial inputs.
+It is evident that both adversaries pose a considerable challenge to \chat, through their ability to mislead the model's judgement. It should be noted that these adversaries are prevalent in everyday interactions, and the existence of numerous forms of textual adversarial attacks highlights the necessity of defensive strategies for \chat.
+Unlike adversarial inputs, it is not easy to analyze why \chat performs bad for OOD datasets since the notion of ``distribution'' is hard to quantify.
+
+
+\input{submissions/submission4/tables/tb-case-adv.tex}
+
+
+\section{Discussion}
+
+
+
+
+\subsection{Adversarial Attack Remains a Major Threat}
+\label{sec-discuss-adv}
+
+As discussed in experiments, dealing with adversarial inputs still remains challenging to large foundation models.
+With the proliferation of foundation model service such as \chat, such adversarial vulnerability remains a major threat to various downstream scenarios, especially those safety-critical applications.
+On the other hand, since adversarial inputs are subjectively generated by humans, but not exist in nature, we argue that foundation models might never cover all distributions of possible adversarial inputs during their training~\cite{ilyas2019adversarial}.
+Other than error correction, a possible solution for model owners is to first inject adversarial inputs to their training data, which could improve its robustness to existing adversarial noise.
+Then, as a long-standing goal to improve the model robustness, the pre-trained model can be continuously trained on human-generated or algorithm-generated adversarial inputs.
+
+As for those who cannot train large models and only use them in downstream tasks, such threat still exists due to the defect inheritance of pre-trained models.
+In this case, how to achieve perfect fine-tuning or adaptation performance on downstream tasks while certainly reducing the defect inheritance remains a major challenge.
+Luckily, some pioneering work~\cite{zhang2022remos, chin2021renofeation} might provide solutions.
+This represents a novel and emerging direction for future research.
+However, as foundation models grow larger that go beyond the capabilities of most researchers, reducing the defects through fine-tuning could be impossible.
+An open question rises for both model owners and downstream users on how to defend the adversarial attack.
+
+In addition to adversaries in training data, prompts can also be attacked~\cite{maus2023adversarial}, which requires further knowledge and algorithms to deal with.
+This is currently a challenging problem due to the sensitivity of prompting to LLMs.
+
+
+\subsection{Can OOD Generalization be Solved by Large Foundation Models?}
+\label{sec-discuss-ood}
+
+Larger models like \chat and text-davinci-003 have the potential to achieve superior performance on OOD datasets with better prompt engineering, inspiring us to think of the problem: is OOD generalization solved by these giant models?
+The huge training data and parameters are a double-edged sword: overfitting vs. generalization.
+It is also intuitive to think that OOD data is unseen during training, so adding it into training set is enough, which is what these large models did.
+Is the ``unreasonable effectiveness of data''~\cite{sun2017revisiting} real?
+However, as the model sizes are becoming larger, it still remains unknown when and why LLMs will overfit.
+
+Another possible reason is the training data of \chat and text-davinci-003 actually encompass similar distributions to our test sets even if they are collected after 2021.
+\flip is for product review and \ddx is for medical diagnosis, which in fact are common domains widely existing on the Internet.
+Thus, they could be not OOD to these models, that could lead to overfitting.
+New datasets from long-tailed domains are in need for more fair evaluations.
+
+Finally, our analysis does not show that ID-OOD performances are always positively correlated~\cite{miller2021accuracy}, but can sometimes inversely correlated~\cite{teney2022id}.
+Regularization and other techniques should be developed to improve the OOD performance of language models.
+
+
+\subsection{Beyond NLP Foundation Models}
+
+Adversarial and OOD robustness do not only exist in natural language, but also in other domains.
+In fact, most research comes from machine learning and computer vision communities.
+Researchers in computer vision area could possibly think: can we solve OOD and adversarial robustness in image data by training a vision foundation model?
+For instance, the recent ViT-22B~\cite{dehghani2023scaling} scales vision Transformer~\cite{dosovitskiy2020image} to 22 billion parameters by training it on the 4 billion JFT dataset~\cite{zhai2022scaling} (a larger version of the previous JFT-300M dataset~\cite{sun2017revisiting}), which becomes the largest vision foundation model to date.
+ViT-22B shows superior performance on different image classification tasks.
+However, it does not show ``emergent abilities''~\cite{wei2022emergent} with the increment of parameters as other LLMs.
+Not only LLMs, the robustness in other areas also remains to be solved.
+
+Back to theory, algorithms, and optimization areas, which foundational research areas in artificial intelligence.
+Will the large foundation models disrupt these areas?
+First, we should acknowledge that the success of foundation models should also attribute to these areas, e.g., most LLMs adopt the Transformer~\cite{vaswani2017attention} and other advanced learning and training research.
+Second, the success of foundation models shed light on these areas: can we solve the problems like adversarial and OOD by developing new theories, algorithms, and optimization methods?
+Such research could offer valuable contribution to foundation models, e.g., improve the data and training efficiency and efficacy.
+Finally, researchers in these areas should not be dis-encouraged since the advance of scientific research should be diverse and not restricted to those done with rich computing resources.
+
+
+
+
+
+
+% \subsection{Suggestions to Future Research}
+
+
+
+\section{Limitation}
+
+This paper offers a preliminary empirical study on the robustness of large foundation models, which has the following limitations.
+
+First, we only perform zero-shot classification using \chat and other models.
+Results of these models could change if we perform fine-tuning or adaptation given enough computing resources.
+But as we stated in introduction, it is expensive and un-affordable to perform further operation on today's latest foundation models, we believe zero-shot evaluation is reasonable.
+
+Second, it seems controversial to evaluate large foundation models on small datasets in this work.
+However, since the training data of \chat and some large models remains unclear, it is difficult to find larger datasets.
+Especially, \chat is trained on huge datasets on the Internet as of 2021, making it more difficult to find appropriate datasets for thorough evaluation.
+We do believe more datasets can be used for such evaluation.
+
+Third, we did most evaluations on text classification and only minor evaluations on machine translation.
+It is well-known that \chat and other foundation models can do more tasks such as generation.
+Again, because of lack of appropriate datasets, evaluating generation performance is also difficult.
+We also admit that introducing more proper prompts could improve its performance.
+
+Fourth, it is worth noting that \chat is mainly designed to be a chatbot service rather than a tool for text classification.
+Our evaluations are mainly for classification, which have nothing to do with the robustness of \chat for online chatting experience.
+We do hope every end-user can find \chat helpful in their lives.
+
+Finally, we could further provide detailed synopsis by conducting experiments on data before 2021 as comparisons and analyzing more OOD cases to see why \chat succeeds or fails.
+Other experiments include detailed ablation study using different language models and investigation of induced outputs by LLMs through prompts.
+These can be done in future work.
+Another claim is that \chat is not perfect for adversarial tasks.
+But we also need to develop certain metrics to show `how good' is the performance.
+
+
+\section{Conclusion}
+
+This paper presented a preliminary evaluation of the robustness of \chat from the adversarial and out-of-distribution perspective.
+While we acknowledge the advance of large foundation models on adversarial and out-of-distribution robustness, our experiments show that there is still room for improvement to \chat and other large models on these tasks.
+% We then analyzed the influence of prompts, indicating that \chat is sensitive to prompts.
+Afterwards, we presented in-depth analysis and discussion beyond NLP area, and then highlight some potential research directions regarding foundation models.
+We hope our evaluation, analysis, and discussions could provide experience to future research.
+
+\section*{Acknowledgement}
+
+This paper received attentions from many experts since its first version was released on ArXiv.
+Authors would like to thank all who gave constructive feedback to this work.
+
+
+\section*{Disclaimer}
+
+\paragraph{Potential Ethics and Societal Concerns raised by \chat Robustness}
+The increasing popularity of \chat and other chatbot services certainly face some new concerns from both ethics and society.
+The purpose of this paper is to show that \chat can be attacked by adversarial and OOD examples using existing public dataset, but not to attack it intentionally.
+We hope that this will not be leverage by end-users.
+Finally, we also hope the community can realize the importance of robustness research and develop new technologies to make our systems more secure, robust, and responsible.
+
+% \paragraph{\chat usage}
+% Some authors in this paper are from mainland China where \chat is currently unavailable.
+% In order to conduct this research without disobeying local laws and OpenAI service terms, Hao Chen, who is one of our coauthors and lives in U.S., did all experiments related to \chat and OpenAI.
+% All experiments on \chat are based on its Feb 13 version.
+% Further updates of \chat may lead to change of the results in this paper.
+
+\paragraph{The contribution of each author}
+Jindong led the project, designed experiments, wrote the code framework, and wrote the paper.
+Xixu and Wenxin shared equal contributions.
+Xixu was in charge of processing, experimenting, and writing about the \ddx and ANLI datasets.
+Wenxin designed all prompts to generative models and wrote about this part.
+Hao did the machine translation experiments, wrote necessary codes, and was in charge of code organization and reproducibility.
+Runkai helped polish the paper and organized case study.
+Other authors actively participated in this project from day one, reviewed the paper carefully, and provided valuable comments to improve this work.
+
+
+
+\bibliographystyle{plain}
+\bibliography{submissions/submission4/refs}
+
+\end{document}
