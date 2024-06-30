@@ -1,0 +1,57 @@
+\subsection{Case Study: APEx for Accuracy-Aware DP Data Exploration}
+
+APEx prioritizes accuracy in query specification through why-DP-provenance techniques. Additionally, it employs noise tracking for processing exploration workloads, leveraging how-DP-provenance. These features enhance the usability of the basic DP system.
+
+\subsubsection{Problem and Technical Brief}
+APEx is among the first systems to empower data analysts, even those without prior DP expertise, to easily specify private queries. It achieves this by allowing analysts to focus on their desired outcome, the answer's accuracy, rather than needing to grapple with complex privacy budgets. This ability to specify accuracy expectations exemplifies \underline{why-DP-provenance} in action, as it provides valuable information about the usefulness and confidence intervals of query results. This feature ultimately enhances the user experience with DP systems. To achieve this user-centric approach, APEx made several vital contributions: 
+\begin{itemize}
+    \item A New Language for DP Queries: APEx designed a new, SQL-like query language tailored for DP tasks. This language simplifies query specification for analysts.
+    \item Accuracy-Privacy Translation Framework: APEx developed a framework that automatically translates an analyst's desired accuracy level into an optimal DP mechanism. This framework eliminates the need for analysts to choose a mechanism themselves. APEx also compiled a comprehensive library of the latest DP mechanisms, ensuring the framework has the best one to achieve the desired accuracy-privacy trade-off. 
+\end{itemize}
+In addition to these why-provenance advancements, APEx also introduced a novel data-dependent DP mechanism that leverages \underline{how-DP-provenance}. This mechanism tracks the noise added during query processing to minimize privacy costs while still meeting the specified accuracy requirements. We will delve deeper into each of these contributions in the following sections.
+
+
+\stitle{Query Language with Accuracy Measures.}
+APEx aims to support SQL-like declarative query languages with accuracy specifications.
+The syntax of the query language is defined in the following format.
+\begin{center}
+\begin{tabular}{c}
+\begin{lstlisting}[mathescape=true]
+BIN $D$ ON $f(\cdot)$ WHERE $W=\{\phi_1,\ldots,\phi_L\}$
+[HAVING $f(\cdot)>c$]
+[ORDER BY $f(\cdot)$ LIMIT $k$]
+ERROR $\alpha$ CONFIDENCE $1-\beta$;
+\end{lstlisting}
+\end{tabular}
+\end{center}
+
+The meaning of this query syntax is to map a database $D$ into bins of rows $\{b_1,\ldots,b_L\}$ based on a workload of predicates $W=\{\phi_1,\ldots,\phi_L\}$, where each bin $b_i$ contains rows that satisfy the predicate $\phi_i$. Then it applies the aggregation function $f(\dot)$ (e.g., count and sum) over each bin $b_i$.
+The two lines in the brackets are optional. A \textit{workload counting query} (WCQ) is simply the query when $f()$ is a counting function that returns the bin size without the two optional lines. A similar query with the HAVING clause is an \textit{iceberg counting query} (ICQ) that returns a list of bin identifiers $b_i$ for which $f(b_i) > c$, and a query with the ORDER BY ... LIMIT clause is called the \textit{top-k counting query} (TCQ) that returns the $k$ bins that have the largest values for $f(b_i)$.
+
+For a query with a numerical output like WCQ, there are multiple accuracy semantics considered by the literature, such as mean square error (MSE)~\cite{XiaoBHG11relativeerror}, relative error~\cite{XiaoBHG11relativeerror}, and $(\alpha,\beta)$-accuracy~\cite{dwork2014algorithmic}. APEx considers $(\alpha,\beta)$-accuracy for WCQ and extends it to non-numerical queries like ICQ and TCQ. In particular, we say a mechanism $M$ satisfies $(\alpha,\beta)$-WCQ accuracy, if with a high probability $1-\beta$, for each predicate $\phi\in W$,
+the absolute difference between its noisy answer returned by $M$ and its true answer is bounded by $\alpha$, i.e., $$\Pr[\max_{\phi\in W}|M_{\phi}(D)-c_{\phi}(D)|\leq \alpha]\geq 1-\beta.$$ For a non-numerical query like ICQ, APEx has two parts for its accuracy requirement: 
+$$\Pr[|\{\phi \in M(D) ~|~ c_{\phi}(D) < c-\alpha\}|>0] \leq \beta$$
+$$\Pr[|\{\phi \in (W-M(D)) ~|~ c_{\phi}(D) > c+\alpha\}|>0] \leq \beta$$ simultaneously. This first part corresponds to the type I error that wrongly labels predicates with a true count less than $c$ as $>c$. The second part is for the type II error that labels the predicates with a true count greater than $c$ as $<c$.
+The accuracy definition is satisfied if, with a high probability of $1-\beta$, all predicates with true counts greater than $ c+\alpha$ or less than $ c-\alpha$ are correctly labelled.
+APEx extends the same logic to the accuracy requirement for TCQ in a similar flavor.
+Note that both $(\alpha,\beta)$-ICQ accuracy and $(\alpha,\beta)$-TCQ accuracy definitions consider \textit{symmetric} errors. 
+Definitions and mechanisms that extend to \textit{asymmetric} errors are discussed and proposed in the MIDE system for private decision-making~\cite {Ghayyur2022mide}.
+
+
+\stitle{Accuracy-Privacy Translation Framework.} 
+For each query and its accuracy specification, APEx automatically finds the best mechanism that satisfies the accuracy specification of the query with the least privacy budget. First, APEx prepares all the existing DP mechanisms and executes them in two phases: (i) privacy cost estimation, which simulates how much privacy budget would be needed if the mechanism were used, and (ii) running the algorithm, which actually runs the mechanism and returns the answer to the data analysts. Second, APEx stores all the relevant state-of-the-art DP mechanisms for each query type since the best one depends on the query and the data. For example, for WCQ, APEx provides two data-independent translation mechanisms. The first data-independent mechanism is the baseline \textit{Laplace mechanism}, which analyzes the error bounds of Laplace noise and obtains directly a closed-form expression of bounds on the translated privacy budgets.
+The second mechanism, \textit{strategy-based mechanism}, 
+uses the matrix mechanism~\cite{li2014data,LiMHMR15} to analyze the overlapping parts of the workload $W$ and reuse the noisy intermediate results for the overlapping part to translate the same accuracy target into, in many cases, a tighter bound on privacy budget. The strategy-based mechanism is also data-independent and can be generalized to all the query types.
+
+\stitle{Data Dependent Accuracy-Privacy Translation.} APEx considers a data-dependent accuracy-privacy translation mechanism for ICQ, an example of how-DP-provenance.
+An ICQ involves comparing the bin sizes with the threshold value $c$. For example, the data-dependent Laplace mechanism adds noise to the true bin sizes and compares the noisy bin sizes with the threshold. For example, given an accuracy target $\alpha=10, \beta=0.00001$, APEx will translate this into budget $\frac{\ln{(1/2\beta)}}{\alpha} = 0.85$ for the Laplace mechanism. However, if the bin sizes are far away from the threshold, let's say $c_{\phi}(D)=1000$ and the threshold is $c=100$ where the difference is 90 times $\alpha$, then it may be sufficient only to use $\frac{0.85}{90} \approx 0.01$ privacy budget. As APEx does not know the distance between the true bin sizes and the threshold, it proposes a \textit{multi-poking mechanism} that starts with a small privacy budget and tests multiple times with increasing privacy budgets until it can determine the noisy answer would satisfy the accuracy target confidently. 
+Rather than drawing independent Laplace noise in each iteration, this multi-poking mechanism stores the privacy budgets and the noise used in previous ``pokings'' and samples correlated noise each time~\cite{koufogiannis2015gradual}. This correlated noise allows the overall privacy loss to be bounded by the privacy budget of the last poking instead of the sum of the privacy budgets over all the poking steps.
+
+\subsubsection{Improvements and Limitations}
+APEx offers several advantages that make it easier to conduct private data analysis:
+1) \textit{usability improvement via why-DP-provenance}, where APEx empowers data analysts, even those without prior privacy expertise, to achieve high accuracy in tasks like entity resolution, as shown in its user studies; 2) \emph{privacy improvement via how-DP provenance}, where the new multi-poking mechanism significantly reduces the privacy budget needed for specific workloads (4 out of 8 ICQ workloads in studies) compared to traditional approaches.
+While APEx offers significant benefits, it is essential to acknowledge some limitations: 1) \textit{compatibility with accuracy bounds}, for not all data privacy algorithms have clearly defined accuracy limitations, which restricts APEx's ability to incorporate them into its framework; 2) \textit{runtime overheads}, for 
+APEx requires running all the relevant mechanisms and storing/tracing the correlated noise calibration in the multi-poking mechanism, though they are relatively small and are only needed at runtime.
+
+
+

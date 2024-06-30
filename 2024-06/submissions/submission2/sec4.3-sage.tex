@@ -1,0 +1,54 @@
+\subsection{Case Study: User-Level Adaptive Block Composition in Sage and Cohere}
+
+Systems like Sage~\cite{LecuyerSVG019sage} and Cohere~\cite{nicolas2023cohere} aim to build a DP system that can continuously run with a finite global budget.
+To achieve this, Sage and Cohere, different from the basic DP system, enable more fine-grained privacy accounting (i.e., where-DP-provenance) at the level of subsets (i.e., blocks) of the data and replace the retired data blocks with new data.
+In addition, Cohere achieves user-level DP (privacy resolutions in where-DP-provenance) and enables budget allocation optimization over a batch of applications/queries (i.e., features how-DP-provenance).
+
+\subsubsection{Problem and Technical Brief}
+Sage and Cohere study the approaches to building DP systems that can continuously run with a finite global budget.
+They explore the heterogeneous input data streams and the parallel/block composition techniques that account for privacy loss over disjoint subsets of data.
+
+\stitle{Block Composition in Sage~\cite{LecuyerSVG019sage}.} 
+Block composition is an extension of parallel composition to the streaming data model.
+To apply block composition, at each timestamp, the system will create a new data block with disjoint sets of data from the previous blocks and also maintain the state of the block with a privacy filter~\cite{RogersVRU16odometer}.
+Note that the creation/split of the block is based on some publicly known specifications while the data blocks after splitting is remaining secret.
+The specifications are criteria of how data is split over public domain values of certain attributes, e.g., timestamp, userID, geography.
+At query time, the system allows to run DP queries adaptively over the overlapping subsets of the blocks created so far.
+The privacy accounting is performed by updating the privacy filter per block, which is intuitively enforcing adaptive sequential composition (or other tighter composition bounds~\cite{lecuyer2021odometer}) within a block and parallel composition across blocks (if a query is answered using multiple blocks)\footnote{By using privacy filter, Sage can support strong composition~\cite{dwork2010boosting,KairouzOV17} with block composition.}.
+Sage applies block composition over time splits and hence guarantees event-level DP.
+The subsequent work, Cohere~\cite{nicolas2023cohere}, extends the methodology of block composition and applies to user-level DP.
+
+
+
+\stitle{Partitioning Attributes and User Rotation in Cohere~\cite{nicolas2023cohere}.}
+Cohere creates new blocks based on split over both userIDs and a (set of) given attribute(s).
+That is, each block generated contains a new batch of users that never appear in the previous blocks and a value in the selected partitioning attributes.
+For example, data block 1 contains users 1-3 all with region A, and data block 2 has users 4-6 all with region B, and block 3 consists of users 7-9 with region A, etc.
+Cohere then applies block composition over the user data blocks and retires users with replacement of new users to keep the system continuously running.
+Cohere also adopts a user rotation mechanism to prevent users from retiring too quickly from certain subpopulations (in terms of some values of the partitioning attributes), which reduces biases in answering queries or running applications.
+The approach is based on sliding windows (or, in essence, the least recently used strategy) so that it is independent of the user attributes.
+In particular, at each timestamp, the newly joined users are randomly partitioned/assigned into groups, and the group that was active the longest will be retired (tentatively if the budget over this group is not depleted), and a new group will be activated.
+The budget spent by queries at this timestamp will be capped with $1/K$ of the global budget where $K$ is the number of active groups.
+
+\stitle{Formalizing Optimization Problem in Cohere~\cite{nicolas2023cohere}.}
+Cohere further uses the tracked budget allocation history per block (or where-DP-provenance) to develop an optimization problem, as a variant of the multidimensional knapsack problem, for query answering.
+Each query $R_i$ in the Cohere system is annotated with a propositional formula $\Phi_i$ over the partitioning attributes, a privacy budget $\mathbf{C}_i \in \mathbb{R}_{\geq 0}^{|\mathcal{A}|}$, and a weight $W_i \in \mathbb{N}$.
+The goal of Cohere's query processing is to batch all the queries $\mc{R}$ received at the current timestamp, and find an optimal (in terms of the weights) set of queries to answer while subject to privacy constraints due to partitioning attributes.
+To formulate the optimization problem, Cohere introduces decision variables $y_i \in \{0, 1\}$ for $i \in \mathcal{R}$, where $y_i = 1$ means the request $R_i$ is accepted, and $y_i = 0$ means the request has been rejected.
+The privacy constraints are defined over blocks $\mc{S}$.
+A block $S_j \in \mc{S}$ is denoted by $(groupid, \Psi_j, \mathbf{B}_j)$, where $\Psi_j$ is a propositional formula over the partitioning attributes and $\mathbf{B}_j \in \mathbb{R}_{\geq 0}^A$ is the remaining budget for this block.
+Given the demand for a block, written as $d_{ij} = \mathbf{C}_i$ if $\Phi_i \land \Psi_j$ is satisfiable, and $0$ otherwise, the optimization problem is formalized as $\max \sum_{i \in \mathcal{R}} \ y_i \cdot W_i, ~\text{s.t.} \sum_{i \in \mathcal{R}}  d_{ij} y_i \leq B_j, ~ [\forall j \in \mathcal{S}]$.
+Cohere generalizes the problem into an integer linear programming (ILP) problem and solves it with an ILP solver.
+Cohere also shows an optimization technique to reduce the dimensionalities to scale the solving process.
+
+
+
+\subsubsection{Improvements and Limitations}
+Sage and Cohere report the benefit of enabling block composition and recording per block budget consumption (viz., where-DP-provenance) through extensive experimental evaluations.
+Sage shows that with block composition, the system can train a machine learning model with a lower mean squared error (MSE) that cannot be achieved by sequential composition ($\Delta$=0.0002); to achieve the same MSE, block composition requires much less data than sequential composition (10x-100x less in certain cases).
+On the other hand, Cohere is compared with PrivateKube~\cite{LuoPTCGL21PrivateKube}, a privacy budget scheduler built based on Sage.
+In an end-to-end comparison with PrivateKube, Cohere shows an improvement in handling 1.5x-2.0x more queries and a 6.4x–28x better utility due to the partitioning attributes approach and the more fine-grained privacy analysis. All these experimental results on Sage and Cohere validate the effectiveness of enabling where-DP-provenance in a DP system.
+
+However, Cohere cannot be run in real-time systems since maintaining the block composition and solving the optimization problem requires, on average, 48 minutes and around 1.3 GB of memory. Empirical results also observe an increasing runtime when using the partitioning attribute approach.
+Another limitation of using block composition or partitioning attributes with where-DP-provenance is that they assume the criteria for creating the partitioning is publicly known; otherwise, it will cause problems in the privacy analysis.
+Removing the assumption may be a future direction to explore for where-DP-provenance.
