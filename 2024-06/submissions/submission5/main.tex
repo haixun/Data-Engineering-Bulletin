@@ -1,0 +1,232 @@
+\documentclass[11pt]{article}
+
+% Language setting
+% Replace `english' with e.g. `spanish' to change the document language
+\usepackage{babel}
+
+% Set page size and margins
+% Replace `letterpaper' with `a4paper' for UK/EU standard size
+\usepackage{geometry}
+
+% Useful packages
+\usepackage{multirow}
+\usepackage{subfloat}
+\usepackage{stfloats}
+\usepackage{float}
+\usepackage{subfig}
+\usepackage{subcaption}
+\usepackage{caption}
+\usepackage{amsmath}
+\usepackage{hyperref} 
+\usepackage{graphicx} 
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithm2e}
+\usepackage{amsthm}
+\usepackage{comment}
+\newtheorem{defn}{Definition}
+\graphicspath{{MainFolder/}} 
+
+\begin{document}
+
+\title{A Review of Adaptive Techniques and Data Management Issues in DP-SGD}
+\author{Islam A. Monir, Muhamad I. Fauzan, Gabriel Ghinita}
+
+\date{}
+
+\maketitle
+
+\begin{abstract}
+Differentially-Private Stochastic Gradient Descent (DP-SGD) established itself as the most prominent technique for training neural networks with formal privacy guarantees. Almost a decade after its introduction, DP-SGD has become the de-facto standard for privacy-preserving learning from large datasets with individual records. However, important research and engineering issues remain open to more accurate and efficient solutions. Existing approaches either require large amounts of privacy budget to train accurately, and incur high overheads in terms of computational and memory resources consumption. In this article, we provide a critical review of some of the most prominent DP-SGD approaches, and discuss their relative strengths and weaknesses. Specifically, we look at several adaptive approaches that attempt to improve the privacy-accuracy trade-off during learning, by dynamically adjusting parameters such as clipping threshold, learning rate or budget allocation. We also provide an overview of important data management aspects in DP-SGD, which influence significantly its computational and memory overhead. Finally, we review a novel approach to support heterogeneous privacy requirements, i.e., individualized privacy settings.
+\end{abstract}
+
+\section{Introduction}
+
+The past decade witnessed the emergence of machine learning, and in particular neural networks, as the tool of choice for a broad area of application domains, e.g., healthcare, social media, computer vision, cybersecurity, etc. For neural network to perform accurately, large input datasets are required to train them. Often, these datasets consist of individuals' data, e.g., user profiles and purchasing records, patient records, user browsing history, etc., which if not carefully handled, may disclose sensitive data regarding one's health status or personal lifestyle details.
+
+To address individual privacy concerns, differential privacy (DP)~\cite{dworkDP} emerged as the de-facto standard in data protection. The main strength of DP is that it provides formal protection guarantees, and it allows one to derive statistically-significant patterns from large amounts of user-centric data, without allowing an adversary to determine whether the data of any targeted individual has been used or not in the model's training set. In the context of training neural networks, DP has been implemented in conjunction with the popular Stochastic Gradient Descent (SGD) approach, resulting in its privacy-preserving version DP-SGD~\cite{RefWorks:RefID:40-abadi2016deep}. While DP-SGD is a powerful tool, it still presents challenges with respect to the trade-off between privacy and utility of learned models, as well as a number of performance concerns. A significant number of research contributions~\cite{RefWorks:RefID:37-andrewdifferentially,chen2020stochastic,RefWorks:RefID:35-pichapati2019adaclip:,RefWorks:RefID:39-he2022exploring,RefWorks:RefID:38-koskelalearning}, focused on how to adapt DP-SGD and tune it such that utility is increased. In this paper, we provide a review of some of the most prominent adaptive DP-SGD approaches, and we also look at several novel techniques that explore personalized individual requirements~\cite{pate,haveit}. In addition, we explore several data management and performance issues that arise when privately training large models using sizeable datasets. Finally, we provide a brief experimental benchmarking of some of the reviewed approaches, with the purpose of comparing their performance head-to-head on common datasets and under similar parameter settings.
+
+The rest of the article is organized as follows: Section~\ref{bckg} presents fundamental concepts and definitions. Adaptive strategies are overviewed in~Section~\ref{sec:adaptation}. Section~\ref{sec:mgmt} focuses on data management and performance issues in DP-SGD. 
+Section~\ref{sec:individ} looks at approaches for individualized privacy constraints. We perform a comparative experimental analysis of some of the considered approaches in Section~\ref{sec:exps} to better understand their relative performance, followed by conclusions in Section~\ref{sec:conclusions}.
+
+\section{Background}
+\label{bckg}
+
+\subsection{Differential Privacy}
+
+Dalenius' 1977 principle for statistical databases aimed to ensure individual privacy \cite{dalenius1977towards}, but achieving it akin to semantic security turned out to be impossible, posing risks even to those not included in the database. More recently, Differential Privacy (DP) emerged as the preferred model for quantifying the added privacy risks for datasets of individual records.
+The concept of differential privacy was first introduced by Dwork et al. \cite{dworkDP}, who provided a mathematical framework for quantifying the privacy guarantees provided by a given algorithm. 
+\\
+    Differential privacy ensures that attackers cannot discriminate between any two ``sibling'' inputs by looking at query outputs even when taking into account arbitrary background information. It was proposed in order to offer a statistical guarantee that publicly available aggregate data would not disclose the identity of any individual from the dataset. The exact definition of sibling datasets is provided by the neighboring concept, which in machine learning is best-defined as the neighboring relationship on unstructured data as follows. %Put differently, there is a near probability that a published statistical result comes from two possible datasets \cite{DPSurvey}. 
+%The definition of neighboring databases for the two possible datasets is as follows.
+
+\begin{defn}[Neighboring Unstructured Data]\label{def:neighboring}
+    Two unstructured datasets $[US]_i$ and $[US]_j$ are said to be neighboring if the Hamming distance between their aggregated real-valued data representations $x_i$ and $x_j$ is at most $m$ \cite{DPSurvey}, where $m$ is the maximum allowed difference, typically set to 1:
+    \[ d(x_i, x_j) \leq m \]
+\end{defn}
+
+
+\\
+Assume we have two neighboring datasets, $D_1$ and $D_2$, that differ only by a single data item. When we interact with the data via a randomized mechanism $M$, we say that $M$ is $\epsilon$-differentially private if the probability of observing a given output of $M$ does not vary by more than exp($\epsilon$) between any two input different datasets, where $\epsilon$ is defined as the privacy budget. 
+
+\begin{defn}[$\epsilon$-Differential Privacy \cite{DPSurvey,DPSurvey2}]
+A randomized mechanism $M$ satisfies $\epsilon$-differential privacy if for every output $S \subseteq \text{range}(M)$ and for all $D_1 \sim D_2 \in \mathcal{D}^n$, the following holds:
+
+\[
+\Pr[M(D_1) \in S] \leq \exp(\epsilon) \cdot \Pr[M(D_2) \in S].
+\]
+\end{defn}
+
+
+The indistinguishability constraint has later been relaxed to include a $\delta$ additive term, changing the definition to ($\epsilon, \delta$)- differentially privacy. The additional parameter allows for a very small probability (bounded by $\delta$) that the algorithm might deviate from the strict privacy guarantee of $\varepsilon$, providing a trade-off between privacy and accuracy. %This slightly modifies the original equation to become: 
+\begin{defn}[$(\epsilon, \delta)$-Differential Privacy \cite{concentrated,chen2020stochastic}]
+A randomized mechanism $M$ satisfies $(\epsilon, \delta)$-differential privacy if for every output $S \subseteq \text{range}(M)$ and for all $D_1 \sim D_2 \in \mathcal{D}^n$, the following holds:
+
+\[
+\Pr[M(D_1) \in S] \leq \exp(\epsilon) \cdot \Pr[M(D_2) \in S] + \delta.
+\]
+\end{defn}
+
+The Gaussian mechanism is a noise-addition mechanism that satisfies $(\epsilon,\delta)$-DP (for $\delta > 0$). Through this approach, the $L_2$ sensitivity of the query function is adjusted with Gaussian noise \cite{concentrated}.
+
+\begin{defn}[$L_2$ Sensitivity~\cite{concentrated}]
+Let $f: \mathcal{X}^n \rightarrow \mathbb{R}^d$ be a query function. The $L_2$ sensitivity of $f$, denoted by $\Delta_2(f)$, is defined as:
+\[
+\Delta_2(f) = \max_{X \sim X'} \| f(X) - f(X') \|_2
+\]
+\end{defn}
+
+\begin{defn}[Gaussian Mechanism~\cite{concentrated}]
+For any arbitrary $\epsilon$ from the interval $(0, 1)$ and a query function $q$ with $L_2$ sensitivity $\Delta_2(q)$, the Gaussian Mechanism ensures $(\epsilon, \delta)$-differential privacy. This mechanism adds Gaussian noise $N(0, \sigma^2)$ to $q(D)$, where $\sigma$ satisfies 
+\[ \sigma \geq \frac{\Delta_2(q)}{\epsilon} \sqrt{2 \ln\left(\frac{1.25}{\delta}\right)} \]
+
+\end{defn}
+
+Another variation of the differential privacy definition is Rényi Differential Privacy (RDP) \cite{mironov2017renyi}. A generalization of the Kullback-Leibler divergence \cite{kullrenyi}, Rényi divergence serves as the foundation for RDP. Conventional DP quantifies the privacy guarantee by means of the privacy loss parameter $\epsilon$, which limits the probability ratio of a mechanism's outputs in the presence of two adjacent datasets. Conversely, RDP offers a more flexible and fine-grained measure of privacy by including a parameter, $\alpha$ (the order of Rényi divergence), in addition to $\epsilon$.
+
+\begin{defn}[Rényi Divergence \cite{chen2020stochastic,mironov2017renyi}]
+For two probability distributions $P$ and $Q$ and a parameter $\alpha > 1$,  the Rényi divergence of order $\alpha$ is defined as:
+\[
+D_{\alpha}(P \| Q) = \frac{1}{\alpha - 1} \log \left( \sum_{x} P(x)^{\alpha} Q(x)^{1-\alpha} \right)
+\]
+\end{defn}
+
+\begin{defn}[Rényi Differential Privacy \cite{chen2020stochastic,mironov2017renyi}]
+A randomized mechanism $\mathcal{M}$ is said to be $(\alpha, \epsilon)$-RDP if for any two neighboring datasets $D_1$ and $D_2$:
+\[
+D_{\alpha}(\mathcal{M}(D_1) \| \mathcal{M}(D_2)) \leq \epsilon
+\]
+\end{defn}
+
+In differential privacy, tracking the cumulative privacy loss, or privacy budget, is crucial, particularly in scenarios involving multiple applications or complex compositions of privacy mechanisms. Traditional methods often struggle to provide tight and accurate bounds on this cumulative privacy loss. To address this, a sophisticated method known as the Moments Accountant ($MA$) has been developed. The $MA$ leverages the framework of Rényi Differential Privacy (RDP) to achieve precise tracking of the privacy budget. By calculating the moments, or expected values of powers, of the privacy loss random variable, it quantifies the degradation of privacy guarantees over successive computations. This method utilizes RDP to evaluate the Rényi divergence between the output distributions of the mechanism for neighboring datasets at each step, allowing for a more refined and accurate assessment of the privacy-utility trade-off. 
+%It is more often used with Differentially Private Stochastic Gradient Descent (discussed in section \ref{dpsgdsec}) and is discussed more in the work done by Abadi et. al. \cite{RefWorks:RefID:40-abadi2016deep}
+
+
+\subsection{Differentially Private Stochastic Gradient Descent (DP-SGD)}
+\label{dpsgdsec}
+Stochastic Gradient Descent (SGD) is a popular optimization technique employed in the training of machine learning models. SGD iteratively adjusts model parameters by leveraging the gradients of a loss function, which are computed based on a randomly selected subset of the training data, known as a batch \cite{gower2019sgd,tian2023recent}. The specific rule for updating the model parameters is given by:
+
+\[
+\theta_{t+1} = \theta_t - \eta \nabla J(\theta_t; x^{(i)}, y^{(i)})
+\]
+
+where \(\theta_t\) denotes the model parameters at iteration \(t\), \(\eta\) is the learning rate, and \(J(\theta_t; x^{(i)}, y^{(i)})\) represents the loss function evaluated on the current batch \((x^{(i)}, y^{(i)})\).
+
+DP-SGD extends Stochastic Gradient Descent (SGD) to provide differential privacy guarantees while training machine learning models on sensitive data. In DP-SGD, gradient clipping is performed before adding noise to the gradients to ensure that the gradients remain bounded.
+
+The clipped gradient \( \hat{\nabla} f(\theta, D_t) \) for one sample of data \( D_t \) is computed as:
+\[ \hat{\nabla} f(\theta, D_t) = \text{Clip}(\nabla f(\theta, D_t), C) \]
+where:
+\begin{itemize}
+\item \( \nabla f(\theta, D_t) \) is the gradient of the loss function with respect to the model parameters \( \theta \) computed on data sample \( D_t \),
+\item \( C \) is the clipping threshold, which limits the magnitude of the gradients.
+\end{itemize}
+
+Clipping plays a pivotal role in the DP-SGD process in balancing the trade-off between privacy and utility. Clipping the gradients is needed to prevent outliers (extreme or unusually large gradients) and it limits their sensitivity, preventing the model from learning more than a set quantity from any given sample, which prevents inadvertent leakage of information during training and thus satisfies differential privacy. It is important to note that the way clipping is performed can vary, and the method of clipping can end up affecting the algorithms performance. In the original implementation of DP-SGD done by Abadi et. al.~\cite{RefWorks:RefID:40-abadi2016deep}, a random sample from a mini-batch is used to compute gradients. For each sample gradient, a check is performed to see if the magnitude of the gradient is larger than the clipping threshold. If the magnitude of the gradient is determined to be greater than the clipping threshold, it gets scaled down to its $L_2$ norm $C$ as follows:
+\[ \Bar{g}_t \leftarrow g_t(x_i)/\text{max}(1,\frac{||g_t(x_i)||_2}{C})\]
+where $\text{max}(1,\frac{||g_t(x_i)||_2}{C})$ is the maximum value between $1$ and the magnitude of the gradient divided by the clipping threshold. If the magnitude of the gradient is less than the clipping threshold, the gradient would end up being divided by 1, thus preserving the original gradient. If the gradient is larger than the clipping threshold $C$, the value of $||g_t(x_i)||_2$ will ends up being greater than 1, and the original gradient is divides to scale it down to the clipping threshold.
+
+After clipping the gradients, noise is added to ensure differential privacy:
+\[ \tilde{\nabla} f(\theta, D_t) = \hat{\nabla} f(\theta, D_t) + \mathcal{N}(0, \sigma C I_n) \]
+where:
+\begin{itemize}
+\item \( \mathcal{N}(0, \sigma C I_n) \) is the noise term drawn from the Gaussian distribution with mean \( 0 \) and scale parameter \( \sigma C I_n \),
+\item \( \epsilon \) is the privacy parameter, controlling the privacy strength.
+\end{itemize}
+
+After adding noise to the clipped gradients, the model parameters are updated using the noisy gradients:
+\[ \theta_{t+1} = \theta_{t} - \eta \tilde{\nabla} f(\theta, D_t) \]
+
+The use of privacy budgets is a crucial component of DP-SGD. Because SGD is iterative, if one applies the traditional sequential composition theorem \cite{gong2020survey}, which states that the total budget for the learning process is equal to the sum of the budgets used in each iteration, the budget consumption can increase significantly. The moments accountant ($MA$)  introduced in~\cite{RefWorks:RefID:40-abadi2016deep} offers a tighter bound on privacy budget consumption using Poisson sampling.
+
+The trade-off between privacy and utility in DP-SGD encapsulates the delicate balance between preserving the privacy of sensitive data and maintaining the effectiveness of the trained machine learning model. DP-SGD introduces noise to the gradients during the training process to ensure that individual data points do not unduly influence the model updates, thereby providing strong privacy guarantees. However, this noise addition can degrade the quality of the learned model, leading to a reduction in its performance on the task at hand. Figures \ref{fig:sgd} and \ref{fig:dpsgd} illustrate the difference in the algorithm structure between SGD and DP-SGD.
+
+\begin{figure}[h]
+\centering
+    \includegraphics[width=0.7\linewidth]{submissions/submission5/figs/sgd.drawio.png}
+   \caption{Conventional (non-private) SGD workflow}
+   \label{fig:sgd}
+\end{figure} 
+\begin{figure}[h]
+\centering
+    \includegraphics[width=1\linewidth]{submissions/submission5/figs/dpsgd.drawio.png}
+   \caption{DP-SGD workflow}
+   \label{fig:dpsgd}
+\end{figure} 
+
+\iffalse
+\subsection{Gradient Clipping Parameter}
+(Content to be moved to Data Management Section)
+Clipping plays a pivotal role in the DP-SGD process in balancing the trade-off between privacy and utility. Clipping the gradients is needed to prevent outliers (extreme or unusually large gradients) and such limits their sensitivity, meaning we prevent the model from learning more than a set quantity from any given sample, which prevents inadvertent leakage of information during training and preserving the privacy guarantee provided by differential privacy. This bound in the gradient becomes a parameter that is called the clipping threshold. It is important to note that the way clipping is performed can vary from each DP-SGD model, and the method of clipping can end up affecting the algorithms performance. In the original implementation of DP-SGD done by Abadi .et .al\cite{RefWorks:RefID:40-abadi2016deep}, they first take a random sample from a mini-batch and compute the gradient of each sample. Each sample gradient, a check is performed to see if the magnitude of the gradient is larger than the clipping threshold. If the magnitude of the gradient is determined to be greater than the clipping threshold, it gets scaled down to norm $C$. This is given in the equation:
+\[ \Bar{g}_t \leftarrow g_t(x_i)/\text{max}(1,\frac{||g_t(x_i)||_2}{C})\]
+Where $\text{max}(1,\frac{||g_t(x_i)||_2}{C})$ gets the maximum value between 1 and the magnitude of the gradient divided by the clipping threshold. if the magnitude of the gradient is less than the clipping threshold, the gradient would end up being divided by 1, thus preserving the original gradient. If the gradient is larger than the clipping threshold $C$, the value of $||g_t(x_i)||_2$ will end up being greater than 1, thus making the original gradient divide with the clipped value in order to scale down the gradient by the clipping threshold. This kind of clipping is referred to as $l_2$ norm clipping, where the $l_2$ norm is synonymous with the gradient magnitude.
+
+One significant drawback of DP-SGD lies in its perceived computational expense, primarily attributed to the process of clipping per-example gradients. The instantiation and subsequent potential clipping of these gradients are recognized to impose substantial memory and time costs within standard machine learning frameworks. Consequently, private machine learning using DP-SGD is frequently observed to exhibit slower performance and greater computational demands compared to its non-private counterparts. Author He et. al\cite{RefWorks:RefID:39-he2022exploring} suggests there are mainly two different per-example gradient clipping strategies in DP optimization:
+
+Flat Clipping, as initially introduced by Abadi et al. in their original implementation of DP-SGD, presents a foundational clipping schema discussed earlier. However, a notable limitation of this schema arises: flat clipping necessitates gradient norms computation before it can be applied. This sequential requirement mandates the completion of backpropagation first, adding an extra computational step post-backpropagation solely for the purpose of clipping. Consequently, this approach introduces additional overhead, particularly problematic when dealing with models whose weights exceed the capacity of a single device—a common occurrence, especially with larger models.
+Group-Wise clipping was the other schema described that involved partitioning the set of parameters $\theta$ into $K$ disjoint groups. The main idea in group-wise clipping is that each group would have its own clipping threshold, where the gradient within that group is clipped separately. In certain cases, the gradients would be divided into groups based on the layers of the neural network.
+
+We'll begin by exploring per-layer clipping, a form of group-wise clipping that assigns specific clipping thresholds to individual layers within a neural network. In this approach, each of the $K$ layers in the network is assigned its own threshold, denoted as $C_k$, for clipping the gradients of that layer. One notable advantage of per-layer clipping is its immediate applicability—gradient clipping can be performed as soon as backpropagation reaches each layer, unlike flat clipping, which necessitates completion of the entire backpropagation process. Experimental results with per-layer clipping have demonstrated its ability to closely match the memory profile and training throughput of non-private models, proving it to be computationally efficient compared to flat clipping.
+Although per-layer clipping offers computational advantages over flat clipping, it has been reported to exhibit lower accuracy performance in certain scenarios. For instance, when tested on a randomly sampled set of CIFAR-10 examples for privately training WRN16-4, per-layer clipping yielded a validation accuracy of 60.6\%, compared to the 63.1\% achieved with flat clipping (with a privacy budget set to $\varepsilon$ = 3). Observations during training reveal significant fluctuations in the magnitudes of per-layer gradients throughout the process. While gradients may initially be uniformly low, they tend to increase notably for layers closer to the input as training progresses. It is suggested that employing a fixed layer-wise clipping threshold eliminates the structural relationship between gradients of different layers, introducing an additional source of bias on top of the inherent bias associated with flat clipping techniques.
+
+A solution to the performance problems of fixed per-layer clipping is to introduce adaptive clipping thresholds in the hopes of removing the structural bias that comes with clipping gradients of different layers separately. This is mainly done through quantile estimation. Some percentage of the total privacy budget ($r=1\%$ to 10\% of total budget) is allocated for estimating the target quantile for each layer’s gradient norms. The clipping threshold for each layer $C_1,...,C_K$ is then set to the estimated quantiles. The number of gradients clipped in each layer are recorded before each parameter update, and the clipping threshold is then adjusted based on whether too few or too many gradients have been clipped. The fraction of clipped gradients needs to be privatized, and an additional noise multiplier is added to achieve this goal. This addition also affects the noise multiplier for noising parameter updates, and the new noise multiplier is calculated from:
+\[ \sigma_\text{new}=(\sigma^{-2}-K(2\sigma_b)^2)^{-1/2}\]
+Where $\sigm_b$ is the additional noise multiplier for the privatized clipped fraction, σ is the original noise multiplier and $K$ is the number of layers in the neural network (also known as number of groups).
+\fi
+
+\section{Adaptive DP-SGD Approaches}
+\label{sec:adaptation}
+\input{submissions/submission5/adaptation}
+
+\section{Data Management Solutions for DP-SGD}
+\label{sec:mgmt}
+\input{submissions/submission5/data_mgmt}
+
+\section{Individualized Privacy Budget}
+\label{sec:individ}
+\input{submissions/submission5/individ}
+
+\section{Experiments}
+\label{sec:exps}
+\input{submissions/submission5/exps}
+
+
+\section{Conclusions}
+\label{sec:conclusions}
+
+In this article, we reviewed several categories of prominent DP-SGD techniques with respect to several criteria, such as strategies for adaptive hyperparameter tuning, data management considerations, and individualized privacy requirements. With the current advent of machine learning in virtually all application domains, DP-SGD is expected to become increasingly deployed in practice. Therefore, it is important to understand well its privacy-accuracy trade-off, its underlying influential factors, and how to adapt private learning to obtain a good compromise between protection, accuracy and performance. In future work, we plan to extend our review to techniques for private learning in large language models, which present a different set of challenges, due to the multiple ways in which unstructured language from individuals can carry sensitive information into the final model.
+
+
+
+
+
+
+
+
+
+
+\bibliographystyle{ieeetr}
+
+\bibliography{submissions/submission5/sample}
+
+\end{document}

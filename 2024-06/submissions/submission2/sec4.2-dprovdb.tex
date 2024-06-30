@@ -1,0 +1,72 @@
+\subsection{Case Study: DProvDB for Multi-Analyst DP}
+Unlike prior systems, DProvDB enforces privacy constraints, not only on the queries and the input data but also on each analyst. This design aims to achieve a fair distribution of privacy budget among data analysts and a tight privacy control per data analyst. DProvDB also leverages multiple how-DP provenance techniques for its DP mechanisms, including tracking sensitivity and stability of queries like Chorus~\cite{johnson2020chorus} and tracking noise to responses for different analysts, considering how these responses might be interrelated over time.
+In this case study, we will highlight the privacy constraints for why-DP-provenance and the new noise-tracking technique for how-DP-provenance.
+
+
+\subsubsection{Problem and Technical Brief}
+DProvDB considers the problem of building an online query processing system for multiple data analysts, who are regulated not to collude but may break the regulation and collude. These data analysts also have different trust/privilege levels when accessing the data; for example, internal analysts shall use more global privacy budgets than external data analysts.
+DP systems before DProvDB do not distinguish data analysts, and naively tracing each analyst's queries independent of others can waste the global budget --- if collusion happens, the privacy loss across data analysts is upper bounded by $\sum \epsilon_i, \sum \delta_i$ while it is lower bounded by $\max \epsilon_i, \max \delta_i$, where $\epsilon_i, \delta_i$ is the privacy budget spent on each data analyst.
+
+
+Unlike the basic DP system described in Section~\ref{sec:dpsystem}, DProvDB might reject an analyst's query if answering it would exhaust either the analyst's individual privacy budget or the total budget shared by all analysts. This ensures fair and controlled use of privacy resources. To enforce these privacy constraints (\underline{why-DP-provenance}), DProvDB utilizes two key components:
+\begin{itemize}
+    \item Privacy Provenance Table: This table tracks past queries and the privacy budget spent on each. It allows DProvDB to monitor individual and overall budget consumption.
+    \item Custom DP Mechanisms: DProvDB designs specialized DP mechanisms for this multi-analyst environment. These mechanisms consider budget limitations when determining whether to answer a query. 
+\end{itemize}
+Furthermore, DProvDB tackles minimizing the overall privacy loss even in scenarios where analysts might collaborate (collusion). Here, DProvDB leverages a technique based on the additive Gaussian mechanism. This technique reuses previously generated noisy outputs (\underline{how-DP-provenance}) to answer new queries from other analysts to achieve the lower bound for the privacy loss at collusion while still providing useful results. 
+
+Next, we will introduce the building block DP mechanism in DProvDB that achieves the lower privacy bound when all analysts collude for a simple query. We will then present how it is used for online query processing and the necessary provenance information for its deployment in DProvDB.
+
+\stitle{Building Block: Additive Gaussian Mechanism.}
+Consider two analysts $A_1$ and $A_2$ send the same query $q$ with two different privacy budgets $(\epsilon_1,\delta)$ and $(\epsilon_2,\delta)$, respectively (W.L.O.G, assuming $\epsilon_1 > \epsilon_2$). If responding to each analyst separately with an independent Gaussian mechanism (Definition~\ref{def:analytic_gaussian}), i.e., $q(D)+\eta_1$ for $A_1$ and $q(D)+\eta_2$ for $A_2$, where $\eta_1\sim \mathcal{N}(0,\sigma^2_1I)$ for $(\epsilon_1,\delta)$-DP and $\eta_2\sim \mathcal{N}(0,\sigma^2_2I)$ for $(\epsilon_2,\delta)$-DP, then the overall privacy loss if these two analysts collude will be $(\epsilon_1+\epsilon_2,2\delta)$.
+
+The additive Gaussian mechanism first processes the noisy response to $A_1$ with the standard Gaussian mechanism, $q(D)+\eta_1$ from the above distribution. Then, it reuses $\eta_1$ in its response to $A_2$ by returning $q(D)+\eta_1+\eta'$, where $\eta_1'\sim \mathcal{N}(0, \sigma_2^2-\sigma_1^2)$. If $A_1$ and $A_2$ do not collude, the privacy loss to each one of them is $(\epsilon_1,\delta)$-DP and $(\epsilon_2,\delta)$-DP respectively. However, if they collude, the overall privacy loss is bounded by $(\epsilon_1,\delta)$-DP as the most accurate response they can come up with is the noisy response to $A_1$.
+
+
+Note that the additive Gaussian mechanism described above only works for \textit{the identical queries} when the \textit{privacy budget of the first processed query is always greater than that of the future queries}. 
+This limitation poses challenges in online database systems when 1) two analysts' queries \textit{only overlaps} (i.e., not exactly the same), and 2) a query received at a \textit{later timestamp} has a larger privacy budget compared to the processed historical query. To address these challenges, DProvDB devised the additive Gaussian mechanism by carefully selecting, maintaining, and updating a set of historical query answers to different data analysts and their respective privacy consumption over time.  
+
+
+\stitle{Query Answering using Views/Synopses.}
+To solve the first problem of overlapping queries, DProvDB does not directly apply the additive Gaussian mechanism to the queries from the data analysts. Instead, it creates materialized private views or synopses of the data using the additive Gaussian mechanism and post-processes queries on these synopses. 
+These views are essentially histograms (or contingency tables for multiple columns). They capture the distribution of data for specific attributes and allow for processing queries that involve linear combinations of the data points (like finding averages or sums). Synopses are formed by adding different noises to the true answer of each view, and post-processing these noisy synopses does not consume an additional privacy budget. Hence, even if queries from analysts partially overlap or differ entirely, as long as they can be processed using the same view, DProvDB will update the corresponding synopses for this view with the additive Gaussian mechanism and use the updated synopses to answer the queries. 
+
+
+\stitle{Incremental Synopses Maintenance.}
+To tackle the second problem on dynamic budget, DProvDB maintains the noisy synopses \textit{adaptively} based on incoming queries submitted to the system.
+DProvDB, in particular, has \textit{two layers of synopses}: 1) a \textit{global synopsis} per view, and 2) a \textit{local synopsis} per view and per analyst.
+The local synopsis is always generated from the global synopsis using the additive Gaussian mechanism, and the analyst's queries are always processed on their corresponding local synopses (viz., post-processing).
+Therefore, privacy loss across data analysts is always bounded by the privacy budget used for generating global synopses.
+
+To answer queries with a higher privacy budget (i.e., the analyst wants the query answer to be more accurate) while reusing existing synopses, DProvDB updates the global synopses using the following approach.
+When the global DP synopsis $V^{\epsilon}$ does not provide enough accuracy to handle a local synopsis request at privacy budget $\epsilon_t$, DProvDB spends additional privacy budget $\Delta\epsilon$ to update the global DP synopsis to 
+$V^{\epsilon+\Delta\epsilon}$, where $\Delta\epsilon=\epsilon_t -\epsilon$. 
+Here, DProvDB uses the standard Gaussian mechanism, which generates an intermediate DP synopsis $V^{\Delta\epsilon}$ with a budget $\Delta\epsilon$, and then combines the previous synopses with this intermediate synopsis into an updated one.
+The key insight of the combination is to properly involve the fresh noisy synopses by assigning each synopsis
+with a weight proportional to the inverse of its noise variance, which gives the smallest expected square error based on UMVUE \cite{kiefer1952minimum,rao1949sufficient}.
+That is, for the $t$-th release, we combine these two synopses $    V^{\epsilon_t} = (1-w_t) V^{\epsilon_{t-1}} + w_t V^{\Delta\epsilon}$.
+The resulted expected square error for $V^{\epsilon_t}$ is $v_t=(1-w_t)^2 v_{t-1} + w_t^2 v_\Delta$, where $v_{t-1}$ is the noise variance of view $V^{\epsilon_{t-1}}$, and
+$v_\Delta$ is derived from $V^{\Delta\epsilon}$.  The error is minimized at $w_t=\frac{v_{t-1}}{v_\Delta + v_{t-1}}$.
+
+
+
+\stitle{Privacy Provenance Table.} Besides maintaining the global and local synopses, DProvDB keeps a privacy provenance table to manage the privacy budgets. 
+The privacy provenance table $\mc{P}$ consists of (i) a provenance matrix $P$ that tracks the privacy loss of a view in $\mc{V}$ to each data analyst in $\mc{A}$, where each entry of the matrix $P[A_i, V_j]$
+records the current cumulative privacy loss $S^{A_i}_{V_j}$, on view $V_j$ to analyst $A_i$;
+(ii) a set of row/column/table constraints, $\Psi$:
+a \emph{row constraint} for $i$-th row of $P$, denoted by $\psi_{A_i}$, refers to the allowed maximum privacy loss to a data analyst $A_i\in \mc{A}$ (according to his/her privilege level); a \emph{column constraint} for the $j$-th column, denoted by $\psi_{V_j}$ refers to as the allowed maximum privacy loss to a specific view $V_j$; the \emph{table constraint} over $P$, denoted by $\psi_P$, specifies the overall privacy loss allowed for the protected database.
+Due to the privacy constraints imposed by the privacy provenance table, queries can be rejected when the cumulative privacy cost exceeds the constraints. The overall privacy guarantee of the system is then implied by the three levels of privacy constraints over the provenance table.
+Given the privacy provenance table and its constraint specifications,   
+$\Psi=\{\psi_{A_i}|A_i\in \mc{A}\}\cup \{\psi_{V_j}|V_j\in \mc{V} \}\cup \{\psi_P \}$, DProvDB ensures $[\ldots, (A_i, \psi_{A_i},\delta),\ldots]$-multi-analyst-DP; it also ensures $\min (\psi_{V_j}, \psi_P)$-DP for view $V_j\in \mc{V}$ and overall $\psi_P$-DP if all the data analysts collude.
+
+
+\subsubsection{Improvements and Limitations}
+DProvDB is built as a middleware or a multi-analyst interface that works on top of the existing Chorus system~\cite{johnson2020chorus}. This allows DProvDB to leverage Chorus's functionalities while adding its own capabilities. Experiments of DProvDB are tested over the Adult census dataset~\cite{uci_dataset} and the TPC-H synthetic dataset~\cite{tpch_dataset} with two types of workloads, one of which consists of randomized range queries over random attributes while the other simulates traversing a decomposition tree of the domain of selected attributes.
+With more than one data analyst in the experimental setup, empirical results show that DProvDB dominates existing DP query processing systems by answering 2.5x-1000x more queries given the same privacy budget.
+
+One current limitation of DProvDB is the overhead associated with storing, querying, and updating the privacy provenance information (privacy provenance table).  Future work will focus on optimizing these operations for better efficiency.
+Interestingly, the way DProvDB updates synopses based on analyst queries is similar to the problem of \textit{incremental view maintenance} from the field of data provenance. While the current algorithm in DProvDB does not modify the actual queries, there is potential to explore how incremental view maintenance techniques could inspire new and more efficient algorithms for private data management. 
+There are also several interesting future directions related to privacy provenance for multi-analyst DP. For analyst provenance tracking,  research questions and works may be spawned by a deeper intertwinement between privacy provenance and access/leakage control \cite{Pappachan2022tattletale} or focus on a more expressive model for privacy provenance. For example, an analyst may temporarily delegate his/her privacy privilege to other analysts.
+
+
+

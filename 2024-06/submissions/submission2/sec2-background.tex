@@ -1,0 +1,91 @@
+\section{Background}
+
+We introduce and summarize the related definitions of differential privacy.
+Next, we introduce the necessary preliminaries for differential privacy and provenance in databases.
+
+\subsection{Definition of Differential Privacy}
+
+\begin{definition}[Differential Privacy \cite{dwork2006calibrating}]
+
+We say that a randomized algorithm $\mc{M}: \databasedom \rightarrow  \mc{O}$ 
+satisfies $(\epsilon, \delta)$-differential privacy (DP), if for any two
+neighbouring databases $(D,D')$ that differ in only 1 tuple, 
+and $O\subseteq \mc{O}$, we have
+$$
+\Pr[\mc{M}(D) \in O] \leq e^\epsilon \Pr[\mc{M}(D') \in O] + \delta.
+$$
+\end{definition}
+
+\begin{definition}[Global Sensitivity]
+For a query $q: \mathcal{D} \rightarrow \mathbb{R}^d$ 
+the $\ell_2$ global sensitivity of this query is 
+$$
+\Delta q = \max_{D, D': d(D,D') \leq 1} \| q(D) - q(D') \|_2,
+$$ 
+where $d(\cdot, \cdot)$ denotes the number of tuples that $D$ and $D'$ differ and $\| \cdot \|_2$ denotes the $\ell_2$ norm. If we replace the $\ell_2$ norm with $\ell_1$ norm, then we obtain the $\ell_1$ sensitivity $\Delta_1 q$.
+\end{definition}
+
+
+
+\stitle{Basic DP Mechanisms.} The most basic DP mechanisms are the Laplace and Gaussian mechanisms, injecting Laplace and Gaussian noises, respectively, into the query answers, which are explained below.
+
+\begin{definition}[Laplace Mechanism~\cite{dwork2014algorithmic}]
+    Given a numerical query $q: \mathcal{D} \rightarrow \mathbb{R}^d$, the Laplace mechanism outputs $\mathcal{M}(D) = q(D) + \eta$  where 
+$\eta \sim {Lap} \left( b \right)^d$ where ${Lap} \left( b \right)^d$ is a vector of $d$ i.i.d. samples from a Laplace distribution with scale $b$. If $b=\Delta_1 q/\epsilon$, then the Laplace mechanism preserves $(\epsilon, 0)$-DP.
+\end{definition}
+
+\begin{definition}[Gaussian Mechanism~\cite{dwork2014algorithmic}]
+\label{def:standarad_gaussian_mech}
+Let $\epsilon \in (0, 1)$. 
+Given a numerical query $q: \mathcal{D} \rightarrow \mathbb{R}^d$, for constant $c > \sqrt{2\ln (1.25/\delta)}$, the Gaussian mechanism adds the noise vector $(\eta_1, \eta_2, \dots, \eta_d)$ to the query answer $q(D)$, where $\eta_i$ are i.i.d. random variables drawn from the Gaussian distribution $\mc{N}(0, \sigma^2I)$ with $\sigma > c \Delta q / \epsilon$.
+The Gaussian mechanism is $(\epsilon, \delta)$-differentially private.
+\end{definition}
+
+The standard Gaussian mechanism \cite{dwork2014algorithmic} has the limitation that it can only be used in a high privacy regime, where the privacy parameter $\epsilon$ should be within the range of $(0, 1)$.
+Balle and Wang \cite{BW18analytic} propose an improved mechanism, namely the analytic Gaussian mechanism, overcoming this limitation in the standard Gaussian mechanism.
+We give the definition of analytic Gaussian mechanism below for completeness, while skipping the details of the mechanism does not affect understanding this article.
+
+\begin{definition}[Analytic Gaussian Mechanism \cite{BW18analytic}]
+\label{def:analytic_gaussian}
+Given a query $q : \mathcal{D} \rightarrow \mathbb{R}^{d}$, the analytic Gaussian mechanism $\mathcal{M}(D) = q(D) + \eta$  where 
+$\eta \sim {\mc{N}} \left( 0, \sigma^2 I \right)$ 
+is $(\epsilon, \delta)$-DP if and only if 
+$$
+\Phi_{\mc{N}} \left( \frac{\Delta q}{2 \sigma} - \frac{\epsilon \sigma}{\Delta q} \right)
+    - e^{\epsilon} \Phi_{\mc{N}} \left( - \frac{\Delta q}{2 \sigma} - \frac{\epsilon \sigma}{\Delta q} \right) 
+    \leq \delta,
+$$
+where $\Phi_{\mc{N}}$ denotes the cumulative density function (CDF) of Gaussian distribution. In this mechanism, the Gaussian variance is determined by $\sigma = \alpha \Delta q / \sqrt{2\epsilon}$ where $\alpha$ is a parameter determined by $\epsilon$ and $\delta$~\cite{BW18analytic}.
+\end{definition}
+ 
+
+\stitle{Privacy Composition Theory.}
+Differential privacy enjoys the nice property of being compositional.
+Running a DP mechanism multiple times is also DP, but with a higher privacy cost.
+One can, therefore, build complex mechanisms by composing basic DP mechanisms using the following composition theorems.
+
+
+\begin{theorem}[Sequential Composition \cite{dwork2014algorithmic}]
+\label{thm:dp_seq_composition}
+Given two mechanisms $\mc{M}_1: \databasedom \rightarrow  \mc{O}_1$ and $\mc{M}_2: \databasedom \rightarrow  \mc{O}_2$, such that $\mc{M}_1$ satisfies $(\epsilon_1, \delta_1)$-DP and $\mc{M}_2$ satisfies $(\epsilon_2, \delta_2)$-DP.
+The combination of the two mechanisms $\mc{M}_{1, 2}: \databasedom \rightarrow  \mc{O}_1 \times \mc{O}_2$, which is a mapping $\mc{M}_{1, 2}(D) = (\mc{M}_1(D), \mc{M}_2(D))$, is $(\epsilon_1+\epsilon_2,\delta_1+\delta_2)$-DP.
+\end{theorem}
+
+\begin{theorem}[Parallel Composition~\cite{mcsherry2009pinq}]
+    Let a mechanism $\mc{M}: \mc{D} \rightarrow \mc{O}$ be $(\epsilon,\delta)$-DP. If $D_1, \dots, D_n \in \mc{D}$ are $n$ arbitrary disjoint sets of databases and $X = D_1 \cup \dots \cup D_n$, the release of mechanism output sequence $\mc{M}(D_1), \dots, \mc{M}(D_n)$ satisfies $(\epsilon,\delta)$-DP. 
+\end{theorem}
+
+\begin{theorem}[Post Processing \cite{dwork2014algorithmic}]
+\label{thm:dp_post_processing}
+For an $(\epsilon, \delta)$-DP mechanism $\mc{M}$, applying any arbitrary function $f$ over the output of $\mc{M}$, that is, the composed mechanism $f \circ \mc{M}$, satisfies $(\epsilon, \delta)$-DP.
+\end{theorem}
+
+\subsection{Provenance in Databases}
+
+Provenance (sometimes also called lineage or pedigree) in databases~\cite{cheney2009provenance} studies the origin or history of the data through a high-level structured computation (e.g., data transformation or query execution) in its lifecycle. By recording more metadata through annotation~\cite{BunemanKT02annotations} or additional data structure (e.g., semiring)~\cite{GreenKT07provenance_semiring,GreenT17provenance_semiring}, data management systems can explain the relationships on how data items in the output (e.g., a tuple produced) depend on (various) source/input (e.g., multiple relational tables).
+The most common provenance models are ``why-'', ``how-'', and ``where-'' provenances, aim to explain, respectively, \emph{why} a particular tuple appears in the output~\cite{BunemanKT01where-prov}, \emph{how} an output tuple is processed and derived~\cite{GreenKT07provenance_semiring}, and \emph{where}, precisely, an output tuple is originated in the sources according to the computation~\cite{BunemanKT01where-prov}.
+Provenance information is useful for understanding the query behavior, data processing steps, and scientific workflows, and thus critical in auditing the integrity, reproducibility, and reliability of data in many scenarios~\cite{cheney2009provenance}.
+
+The relationship between provenance and data privacy has received increasing attention~\cite{PanSR23provenance_sec_privacy,DavidsonKRSTC11prov_privacy,DavidsonKMPR11provenance,DeutchFGM21optimizing_privacy_utility_provenance,Pappachan2022tattletale,PappachanZHM23}. This line of research focuses on the potential privacy risks associated with tracking provenance information, particularly for sensitive data. Researchers explore how revealing provenance details could leak information and investigate techniques to minimize such risks. This might involve suppressing specific parts of provenance queries or hiding certain intermediate data while still achieving desired privacy guarantees.
+Other recent work~\cite{WuTD22provenance} highlights how provenance can be used for maintaining and versioning machine learning models to mitigate privacy attacks towards the models.
+
