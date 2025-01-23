@@ -1,0 +1,117 @@
+presentation:
+
+Hi everyone, I'm Xiaoze. Today I'm sharing my research on evaluating factuality of large language models.
+
+# Path: motivation
+motivation:
+
+The motivation of this research is that large language models have been widely used in various applications, such as chatbots, question answering, and text generation. However, these models have been found to generate incorrect or misleading information, which can be harmful in real-world applications. Therefore, it is important to evaluate the factuality of large language models to ensure the reliability of their outputs.
+
+# Path: comparison_with_previous_work
+comparison_with_previous_work:
+
+
+Earlier efforts to assess the factual accuracy of large language models have often been slow, costly, and not well-suited for examining them on a large scale. In this study, we introduce an innovative approach for efficiently evaluating the factual accuracy of these models. Our method leverages a vast knowledge graph, which includes over ten million facts about different entities and how they're connected. Typically, checking a language model's responses against all these facts would be prohibitively expensive and time-consuming. To tackle this, we've developed a judge model. This model is designed to predict how a large language model would respond to questions derived from the knowledge graph. We train this judge model with a relatively small set of sample questions and answers. Once trained, it can then assess the model's accuracy on a much wider scale across the knowledge graph. This approach offers a practical way to ensure the reliability of large language models without the extensive resources previously required.
+
+
+Next, I will introduce the details of our method.
+
+Our method unfolds in three structured steps, aimed at streamlining the process of evaluating the factuality of large language models:
+
+We begin by gathering a wide array of questions generated from our extensive knowledge graph, which is rich with over ten million facts about various topics and their interconnections. We also collect the language model answers for a small subset randomly sampled from the whole knowledge graph. This collection serves as the foundational dataset for training our judge model. 
+
+With our dataset of questions and their corresponding answers at hand, we proceed to train the judge model. This model is to predict how a large language model would respond to each question. The training process fine-tunes the judge model to accurately assess the expected responses of the large language model, making it adept at predicting the model's performance on factuality tasks.
+
+After training, we deploy the judge model across the entire knowledge graph to evaluate the large language model's factuality on a comprehensive scale. This step involves comparing the large language model's responses to the vast pool of questions against the expected answers as determined by the judge model. Through this extensive evaluation, we can assess the accuracy and reliability of the large language model's factuality, ensuring its outputs are factual and trustworthy.
+
+These steps constitute a thorough and efficient framework for evaluating the factuality of large language models, significantly reducing the time and resources required for such an expansive assessment.
+
+Next, I will delve into the specifics of each step in our method.
+
+
+# Path: method_label_collection
+method_label_collection:
+
+
+In the initial phase of our approach, we focus on gathering a targeted set of data, which will serve as the foundation for training our judge model. This involves randomly sampling a small subset of triples from our knowledge graph. Each triple comprises three elements: a subject, a relation, and an object, effectively forming a complete statement when combined. To introduce a level of challenge and ensure robustness, we also engage in a process known as negative sampling. This involves creating incorrect statements by swapping out elements with random alternatives from the knowledge graph.
+
+Following this, we proceed to verify these statements with the large language model. For instance, if we have the triple "Obama born in Hawaii," we pose a question to the model: "Is the statement 'Obama was born in Hawaii' true or false?" The model is also allowed
+ to express uncertainty by responding with "I don't know." We assign labels to these statements based on the model's responses, systematically applying this procedure to a collection of triples. This meticulous process results in a labeled dataset, ready for the next step: training the judge model.
+
+# Path: method_judge_model
+method_judge_model:
+
+In the second stage of our method, we focus on the development and training of the judge model using the previously labeled dataset. The judge model functions as a classifier. Its role is to analyze the hidden states of the language model's responses to various statements and then predict the language model's respond to these statements, by categorizing them as true, false, or unknown.
+
+The process begins with employing the language model to transform the statement into a set of hidden states. These hidden states serve as a nuanced representation of the statement, encapsulating its semantic properties in a format that the judge model can effectively interpret. We proceed to train the judge model, using these hidden states as inputs and the corresponding labels as outputs.
+
+To enhance the judge model's performance and efficiency, we incorporate two additional components:
+
+First, Recognizing that each statement is preceded by a substantial prompt, which includes the system's prompt, instructions, and other relevant information, we introduce a prompt encoder. The role of this encoder is to condense these extensive prompts into fixed-length vectors. This streamlined approach allows us to only input the statement and a fixed-length prompt vector to generate the hidden states, thereby optimizing the efficiency of the judge model by avoiding the need to process lengthy prompts repeatedly.
+
+Next, Our experimentation revealed an interesting robustness in the judge model, that is, it performed well even when there was a discrepancy between the language models used for encoding statements and those used for labeling. For example, encoding statements with a smaller, seven billion parameter language model, and then training the judge model using labels generated by a larger, thirteen billion parameter model, did not compromise performance. This discovery allows us to use a more compact language model for encoding statements without sacrificing the judge model's effectiveness.
+
+
+
+# Path: method_evaluation
+method_evaluation:
+
+The final step of our method is to evaluate on the rest of the questions in the knowledge graph. We apply the judge model to each question and obtain the predicted label. Here, based on the three types of labels, We define three metrics to evaluate the factuality of the large language model.  
+
+The first metric is Correctness, which directly evaluates the accuracy of the large language model's responses, determining whether the answers are right or wrong.
+The second metric is Truthfulness, which gauges whether the model's responses are either accurate or if it appropriately opts to withhold an answer by stating "I don't know," thus avoiding the dissemination of potentially incorrect information.
+The last metric is Informativeness, which assesses the model's propensity to provide definitive answers, regardless of their correctness, rather than defaulting to "I don't know." This metric values the model's willingness to attempt an answer, indicating a balance between confidence and risk in its responses.
+
+For a thorough evaluation, we not only verify the accuracy of the model's answers against the original triples from the knowledge graph but also against a series of negative examples. These negative instances are designed to test the model's   ability to avoid being misled by incorrect information. By averaging the outcomes across numerous negative examples for each triple, we achieve a robust and nuanced understanding of the large language model's factuality.
+
+
+Next, I will present the experiments and results of our method.
+
+# Path: experiments
+experiments:
+
+For dataset, we conduct experiments on DBpedia, a large-scale knowledge graph containing more than ten million facts.  
+
+For language models, we test meta's llama model and google's gemma model.
+
+For the evaluation metric, we use the correctness, truthfulness, and informativeness defined before. Here, we also evaluate how the judge model aligns with the large language model's answer. We use the common metrics of precision, recall, and F1 score to evaluate the judge model's similarity to the large language model's answer.
+
+
+# Path: results_overall
+results_overall:
+
+This table shows the collected labels and the metrics for the LLaMA and GEMMA models. We can see that the LLaMA 13 billion model performs the best overall, with high correctness, and informativeness scores. 
+We can also obtain a weird observation that the LLaMA seventy billion model has a high rate of responding "I don't know", which affects its informativeness score. For now, we assume that the seventy billion model is more cautious in answering questions, which leads to a higher rate of "I don't know" responses. However, this cautiousness also leads to the best truthfulness score among all models.  To further investigate this, we need to see what will happen if we remove the "I don't know" responses from the evaluation. This is currently ongoing work that I won't present today.
+
+# Path: results_relation_study
+results_relation_study:
+
+We then perform a detailed analysis of the results based on the relation types in the knowledge graph. There are more than six hundred relation types in the knowledge graph, so it's hard to visualize all of them. Here, we group them by the schema types of the relations. The schema types are defined on the entities. So each relation has two schema types, one for the subject or head entity and one for the object or tail entity. For example, the triple "Obama born in Hawaii" has the schema type "Person" because Obama is a person, and the schema type "Place" because Hawaii is a place. We then present the large language model's performance on each schema type to see if there are any patterns in the results.
+
+Here are the results, the figures are the averaged metrics for each schema type. We can still see that the LLaMA 13 billion model performs the best overall. 
+So what can we learn from this study? We can see that the performance of the large language models varies across different relation types. Some relation types are more challenging for the models to answer correctly, while others are easier. This information can be useful for improving the performance of large language models on specific relation types.
+
+For example, we can see LLaMA 2 7b’s head type ‘Book’ has lowest accuracy. So, For triples like (Harry Potter, author, JK Rowling), LLaMA 2 7b is more likely to fail. Because Harry Potter is a ‘Book’, and is in the head position, which is the most challenging for LLaMA 2 7b.  Similarly,
+Gemma 7b’s head type ‘Hotel’ has highest accuracy.  So,￼ For triples like (Quality Inn, headquarter, Maryland), Gemma 7b is more likely to correctly answer. Because Quality Inn is a ‘Hotel’, and is in the head position, which is the easiest for Gemma 7b.
+
+Also, we can see that
+LLaMA 2 7b’s tail type ‘College’ has lowest accuracy. So, For triples like  (Annabel Yao, education, Harvard), LLaMA 2 7b is more likely to fail. Because Harvard is a ‘College’, and is in the tail position, which is the most challenging for LLaMA 2 7b. Similarly,
+Gemma 7b’s tail type ‘Book’ has highest accuracy. So, For triples like (George Orwell, is_author_of, Animal Farm), Gemma 7b is more likely to correctly answer. Because Animal Farm is a ‘Book’, and is in the tail position, which is the easiest for Gemma 7b.
+
+# Path: judge_model_accuracy
+judge_model_accuracy:
+
+We still need to see whether the judge model can accurately predict the large language model's answer. Because if the judge model is inaccurate, the evaluation results will be seriously affected.
+ Here, 
+We evaluate the judge model's accuracy on the labeled data. We use a conventional approach as the baseline, which is to use the last token logits of the language model to predict the label. We can see that Judge model performs lots better than baseline, also, 
+Compressing the instructions with prompt encoder only has little impact on accuracy of judge model.
+We also prove by experiment that
+Using a small substitute model (e.g., LLaMA 7B) to feed the hidden states has little impact on accuracy.
+
+On the efficiency side, we can see that the judge model is much faster than text generation. For example, on the Asix thousand GPU, the judge model can evaluate more than one hundrend statements in 1 second for llama seven billion model, while the llama seven billion model can only generate 2 statements in 1 second. 
+We can also see that, with the model parameter size increasing, the judge model's evaluation speed is not decreasing, this is Because we can use the smallest model to encode the hidden states, and this is a huge advantage. We can use only one GPU to evaluate seventy billion model, but for text generation, it requires four GPUs at least. 
+
+
+In conclusion, our innovative approach transforms the evaluation of large language models (LLMs) by leveraging an extensive knowledge graph coupled with a scalable judge model. This strategy notably minimizes the reliance on human evaluators and conserves computational resources. It sets a new benchmark for gauging LLM accuracy, with the judge model demonstrating remarkable efficiency in verifying facts and bolstering the dependability of the information produced. Furthermore, our method offers invaluable insights into LLM performance, paving the way for future studies focused on improving the trustworthiness of content generated by these advanced models.
+
+Thanks for listening.

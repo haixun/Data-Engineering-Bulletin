@@ -1,0 +1,72 @@
+\section{Learnings from hosting the challenge}\label{sec:hosting}
+In this section, we reflect the experience from creating the benchmark, designing the challenge, and finally hosting the challenge and workshop, and summarize our learnings from this one year journey.
+
+\subsection{How can we design a fair, informative and feasible challenge?}
+We strive to create an informative and engaging challenge, but also need to take into consideration the fairness, accessibility, as well as time and budget constraints. We made several design decisions for the challenge, which turned out to be critical for its success. We narrate these design choices next.
+
+\paragraph{Creating equally accessible retrieval contents.}
+\label{sec:pre-fetch_retrieval_contents}
+Providing equally accessible retrieval contents eliminates the unfair comparison induced by having access to different resources among the participants. A RAG system theoretically can retrieve from the universe of all public and proprietary information sources. Although it is interesting to test RAG systems in an end-to-end manner by allowing participants to use all accessible APIs, it inevitably creates an advantage for large companies or entities that have more resources. We therefore made a decision to provide equally accessible retrieval contents in the benchmark for the challenge, so that all systems can be evaluated against the same set of facilitating information, eliminating the potential unfairness introduced by having access to different amount of retrieval sources. This design choice, although not completely testing the retrieval of the RAG systems, still allows users to evaluate it by combining all the retrieved webpages as the retrieval pool. 
+
+Another advantage of using fixed retrieval contents is to be able to compare over time. Search engines evolve over time. People who use the benchmark questions later on can get better results just because the search engine improves its results. Meanwhile, CRAG retrieval content is available for experiments. Researchers who want to conduct a fair comparison do not need to reproduce the previous results, when the results were reported on CRAG retrieval content. Otherwise, they would need to re-implement existing SOTA systems to make sure the same version of search engines were used. This can be very consuming and even infeasible (if the system involves proprietary implementation or data). We believe providing equally accessible retrieval content can substantially facilitate the research for RAG, and are striving to extend this practice to future studies. See Section~\ref{sec:futurework} for more discussions.
+
+
+
+\paragraph{Setting model constraints.}
+We put the constraints on which model can be used to make the challenge focus on RAG, instead of the base models. The participants can use vanilla or fine-tuned Llama 2 or Llama 3 models as long as the data were publicly available and were not generated from any proprietary model. This decision also ensures the results from the built systems are more comparable. 
+
+
+
+\subsection{How can we ensure the cost is affordable?}
+There are a lot of cost involved in running a large-scale challenge. To ensure its sustainability, we carefully planned to control two major costs: computation and evaluation.
+
+\paragraph{Setting submission limit and hardware constraints.} 
+The computation cost mainly comes from using GPUs to run the inference. We set limits on the number of submissions from each team during the challenge to make sure the computation cost can be controlled. The challenge allows up to six submissions for each team each week in phase 1, and up to six submissions for each team in total in phase 2. 
+
+We also selected a more affordable GPU option: the AWS G4dn.12xlarge instance equipped with 4 NVIDIA T4 GPUs with 16GB GPU memory as the supported hardware for the inference. These GPUs have the limitation that they cannot run the Llama 2 70B or Llama 3 70B full precision models directly. However, the price of those more powerful GPUs were several times higher and would not bring much additional value. Therefore, we decided to choose the more economical option.  
+
+These submission limits, along with the selected hardware configurations, ensured that we can provide enough room for the participants to develop and test their solutions while keeping the computation cost under the budget. 
+
+\paragraph{Using auto-eval in Phase-1 and in Phase-2 initial selection.} 
+Although human-eval is the most comprehensive way for evaluating responses from LLMs, it would be too slow and expensive to support challenges that receive thousands of submissions. Therefore we made an early decision to develop auto-eval solutions for the challenge. Phase 1 of the challenge was purely relying on auto-eval to support the leaderboard. For phase 2, we first used auto-eval to select the top-15 teams for each task, and then employed human manual evaluation to determine the final winners. This design substantially reduced the time and expense (more than 100 times) needed for the evaluation. 
+
+\subsection{How can we ensure the evaluation is reliable?}
+In order to guarantee the evaluation quality, we still need to ensure the auto-eval mechanism has high accuracy, which we discuss next.
+
+\paragraph{Ensuring auto-eval quality.}
+We solve the auto-evaluation problem with an LLM task, where the prompt asks the LLM to determine whether the generated answer is accurate, hallucinated, or missing based on the ground truth information. This is a simple version of the NLP task —{\em consistency} check.
+
+We conducted extensive experiments to make sure the auto-eval solution can have high accuracy~\cite{yang2024crag}. We have two observations when developing the auto-eval solution. First, it is critical to provide high quality ground truth answers for the auto-evaluator to work effectively. During the experiment, we observed that some examples may not have a unique correct answer (e.g., a question about height can be answered in either feet or meters.). Hence, we also provided alternative ground truth answers for the benchmark questions whenever needed. It turned out that these alternative answers were very helpful for reducing evaluation errors. Second, we don't need the most powerful models to serve as the auto-evaluator. Our experiment shows that the accuracy of using the Llama 3 (\texttt{llama-3-70B-instruct}) model and the ChatGPT (\texttt{gpt-3.5-turbo}) are $99\%$ and $94.5\%$ respectively (for predicting accurate, missing and hallucinated responses)~\cite{yang2024crag}. See Table~\ref{tab:auto_eval_accuracy} for more detailed results.
+
+\begin{table}[htbp]
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+                       & \multicolumn{3}{c}{\textbf{F1 Score}}                    & \textbf{Accuracy}    \\
+\midrule
+\textbf{Model}               & \textbf{Correct} & \textbf{Missing} & \textbf{Hallucinated} & \multicolumn{1}{l}{} \\
+\midrule
+\textbf{ChatGPT-3.5 Turbo}   & 92.0\%          & 100.0\%            & 92.0\%            & 94.5\%              \\
+\textbf{Llama 3.0 8B Instruct}  & 94.6\%          & 100.0\%            & 90.7\%            & 95.3\%              \\
+\textbf{Llama 3.0 70B Instruct} & 98.9\%          & 100.0\%            & 97.9\%            & 99.0\%              \\
+\textbf{Llama 3.1 70B Instruct} & 98.2\%          & 100.0\%            & 96.8\%            & 98.4\%              \\
+\bottomrule
+\end{tabular}
+\caption{Auto-eval performance for using different models as the evaluator. The first three columns show the F1 scores on the accurate, missing and hallucinated responses. The last columns shows the overall accuracy on all examples in the CRAG public test set. Llama 3.0 70B and Llama 3.1 70B models achieve accuracy around $99\%$. Llama 3.0 8B, although being much smaller, attains accuracy $95.3\%$, on par with ChatGPT-3.5 Turbo. All models have $100\%$ on the missing answers because we require all missing answers to be answered as ``I don't know", and we use exact match to judge for missing responses during the evaluation.}
+\label{tab:auto_eval_accuracy}
+\end{table}
+
+In the final evaluation, among the nine top-3 winning teams selected by manual evaluation, six of them were also selected by our auto-evaluation. Generally speaking, using LLM-as-a-Judge is a common practice in evaluating language models' performance. Procedures for measuring and resolving the self-enhancement bias, position bias~\cite{zheng2023judging} and preventing prompt attacks play vital roles in ensuring the reliability of the evaluation results.
+
+
+\paragraph{Preventing evaluation attacks.}
+We found three decisions very helpful for protecting the evaluation from hacks. The first one was to keep a held-out test set for the final competition (phase 2). We initially ran the leaderboard in phase 1 using the released public test set, but soon found the leaderboard was filled with $100\%$ accuracy. This was because some teams tried to test the evaluation system and created a map with (query, answer) pairs based on the released data, from which they looked up answers for the test queries during the submission. This issue was remedied by replacing the leaderboard test set with a subset of the held-out dataset. The second decision was to hold out the exact prompt used in the auto-eval to avoid prompt attack. We released an example evaluation prompt to illustrate how the auto-eval works in the starter kit, and later on received questions from the challenge forum calling out ways to hack the prompt for obtaining high scores. During the final competition, we also noticed some submissions that tried to fool the auto-evaluator achieved very high scores. Although the final winners were selected by the manual evaluation, recall that a team needed to be among the top 15 in the auto-eval to be eligible for human-eval. Keeping the evaluation prompt private significantly reduced the risk of prompt attack and also reduced the overhead needed for manual checking after the evaluation. The third one was to disable network connection during the inference. The choice of providing pre-fetched retrieval contents (discussed in Section~\ref{sec:pre-fetch_retrieval_contents}) allowed us to avoid using live web connection during the challenge. This also helped reduce the risk of leaking the private test data during the evaluation stage. 
+
+
+% \begin{enumerate}
+%     \item \textbf{High Cost of Human Evaluation}: Human evaluation is a time-consuming and labor-intensive process. In our study, grading the correctness of each question-answer pair required four people working for one week, with multiple rounds of correction to achieve satisfactory human annotation.
+
+%     \item \textbf{Importance of Alternative Ground Truths}: Allowing multiple correct answers for a question is crucial. We observed that certain questions inevitably have multiple valid responses. For instance, consider the question "How many movies has Justin Bieber directed?" Both "invalid question" and "zero" should be considered correct answers. This flexibility enhances the robustness of the benchmark evaluation process.
+
+%     \item \textbf{Potential for Auto-Evaluation Systems}: Providing ground truths for each question enables the development of automated evaluation systems leveraging large language models like ChatGPT and LLaMA. Notably, during the competition, the ranking of scores generated by auto-evaluation closely matched those from human evaluation, demonstrating comparable accuracy.
+% \end{enumerate}
