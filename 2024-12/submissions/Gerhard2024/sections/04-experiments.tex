@@ -1,0 +1,421 @@
+\label{sec:exp}
+\section{Experiments}
+
+
+\label{setup}
+\subsection{Experimental setup}
+
+
+%%% BENCHMARKS
+\myparagraphnospace{Benchmarks} We run experiments on three benchmarks with different characteristics of questions.
+
+\squishlist
+    \item \textbf{\compmix}.
+    \compmix~\cite{Christmann-CompMix:WWW2024} is a benchmark which was specifically designed for evaluating QA systems operating over heterogeneous sources. The dataset has $9{,}410$ questions, out of which $2{,}764$ are used for testing.
+    Answers are crisp entity names, dates, or other literals.
+    
+    \item \textbf{\crag}.
+    We further evaluate on a subset of the \crag~\cite{Yang-CRAG} dataset, which was recently released as a testbed for RAG-based QA systems.
+    We utilize the same pipeline and sources as outlined in Section~\ref{sec:method}, without using the web snippets or APIs provided with \crag. This way we focus on entity-centric questions that do not require access to live web data (e.g., news feeds), and disregard cases where the results would be up-to-date quantities.
+    This restricts the test data to $436$ entity-centric questions, still enough for a proof of concept.
+    
+    \item \textbf{\timequestions}.
+    To showcase the generalizability of our pipeline, we conduct experiments on~\timequestions~\cite{Jia-TimeQuestions},
+    a benchmark for temporal QA. The dataset requires temporal understanding and reasoning, which are well-known limitations of
+    LLMs~\cite{Dhingra-time-aware-LLM:TACL2022}. \timequestions has 16{,}181 questions (3{,}237 for testing).
+\squishend
+
+Typical examples for the questions in these three benchmarks are:
+
+\begin{quote}
+\compmix: \utterance{Which player won the most number of Man-of-the-Match titles in the FIFA world cup of 2006?}\\
+ \indent \crag: \utterance{What was the worldwide box office sales for little hercules?}\\ 
+  \indent \timequestions: \utterance{Which club did Cristiano Ronaldo play for before joining Real Madrid?}
+\end{quote}
+
+%%% BASELINES
+\myparagraph{Baselines} As competitors or reference points to \method, we study the performance of the following methods:
+
+\squishlist
+    \item \textbf{Generative LLMs}.
+    We compare \method against out-of-the-box LLMs: \textbf{\gptthree} (\texttt{text-davinci-003}), \textbf{\gptfour} (\texttt{gpt-4}) 
+    and \textbf{\llama} (\texttt{meta-llama/Llama-3.1-8B-Instruct}).
+    The same prompt is used for all LLMs, consistent with previous work~\cite{Christmann-CompMix:WWW2024, Zhang-Spaghetti:ACL2024}:
+    \phrase{Please answer the following question by providing the crisp answer entity, date, year, or numeric number. Q: \textless\texttt{question}\textgreater}.
+    
+
+    \item \textbf{Heterogeneous QA methods}.
+    \convinse~\cite{Christmann-CONVINSE:SIGIR2022}, \unikqa~\cite{Oguz-UniK-QA:NAACL2022}, \explaignn~\cite{Christmann-Explaignn:SIGIR2023}
+    are QA methods designed to integrate heterogeneous sources: text, tables and KG. All of these  integrate the exact same sources as \method.
+
+    
+    \item \textbf{\textsc{State-of-the-art}}.
+    For \compmix and \timequestions, we also compare against state-of-the-art methods from the literature: \spaghetti~\cite{Zhang-Spaghetti:ACL2024} and \textsc{Un-Faith}~\cite{Jia-FAITH:WWW2024}, which are among the best performing systems.
+    
+Results are taken from the literature whenever applicable.
+On \crag, we use the models trained on \compmix for \method and heterogeneous QA baselines.
+\squishend
+
+
+
+%%% METRIC(S)
+\myparagraph{Metrics}
+We measure \textit{precision at 1} (\textbf{P@1}) as our main metric~\cite{RoyAnand:MC2021} on all benchmarks.
+On \crag, we manually annotate answer correctness, as the ground-truth answer formats vary (e.g., entity name variants, lists, sentences).
+
+We also compute the number of neural parameters aggregated over all sub-modules (\textbf{\#Parameters}).
+Parameter counts for GPT-models are taken from~\cite{Minaee-LLM-survey}
+(\gptfour might have less active parameters during inference).
+
+For further analysis we measure \textit{answer presence} (\textbf{AP@k}),
+i.e. whether the answer is present in the top-$k$ ranked evidence pieces,
+and \textit{mean reciprocal rank} within the top-$k$ evidences (\textbf{MRR@k}).
+
+%%% CONFIG
+\myparagraph{Configuration}
+Our implementation uses the \texttt{Llama3.1-8B-Instruct} model for the AG stage.
+For the QU, ER and RF stages
+we adopt code from the \explaignn project.\footnote{\url{https://explaignn.mpi-inf.mpg.de}}
+For the ER stage, we use \clocq, setting its specific parameters to $k=10$ and $p=1{,}000$.
+
+As default, we use the GNN technique for the RF stage.
+For efficiency, we use light-weight models for initializing
+the GNN encoders -- the same models used for the CE-based RF.\footnote{\url{https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-4-v2} and\\\url{https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2}}
+The GNNs are trained for $5$ epochs with an epoch-wise evaluation strategy,
+i.e. we choose the model with the best performance on the respective dev set.
+We train the GNNs on graphs with a maximum of $100$ evidence and $400$ entity nodes (as scored by BM25).
+During inference, the first GNN is applied on graphs with $1{,}000$ evidence and $4{,}000$ entity nodes, shrinking the pool of evidence pieces to the top-$100$.
+The second GNN then runs on graphs with $100$ evidence and $400$ entity nodes.
+The factor of 4 entities per evidence (on average) holds sufficient for the observed data,
+and enables batched inference.
+Other parameters are kept as is.
+
+The AG model, based on \texttt{Llama3.1-8B-Instruct}, is 
+fine-tuned
+for $2$ epochs with a warm-up ratio of $0.01$ and a batch size of $8$, again with an epoch-wise evaluation strategy.
+Other parameters are set to the default Hugging Face
+training parameters.\footnote{\url{https://huggingface.co/docs/transformers/v4.46.2/en/main_classes/trainer\#transformers.TrainingArguments}}
+
+
+
+
+
+\subsection{Main results}
+%%% MAIN TABLE
+\myparagraphnospace{\method is competitive on all benchmarks}
+Main results of our experiments are shown in Table~\ref{tab:main-res}.
+First of all, we note that \method achieves competitive performance across all three benchmarks.
+
+On \compmix, baselines for heterogeneous QA and \llama perform similarly,
+whereas GPT-based LLMs can answer more than $50$\% of the questions correctly.
+\method exhibits substantially higher performance, on par with
+the state-of-the-art method \textsc{Spaghetti}~\cite{Zhang-Spaghetti:ACL2024}
+(which is based on \gptfour).
+
+On the \crag dataset, P@1 drops for all methods except for \gptfour. 
+The benchmark includes realistic questions,
+which can be ambiguous/confusing (\phrase{who was the director for the report?}),
+on ``exotic'' entities with answers in social media (\phrase{how many members does the teknoist have?}),
+or require up-to-date information (\phrase{when did chris brown release a song or album the last time?}),
+and other cases that are challenging for all methods.
+
+Finally, \method establishes new state-of-the-art performance on the \timequestions benchmark.
+Interestingly, all of the tested LLMs show greatly reduced performance on this benchmark,
+which inherently requires temporal understanding and reasoning
+-- a known weakness of stand-alone LLMs.
+
+
+\begin{table} [h]
+    \centering
+    \newcolumntype{G}{>{\columncolor [gray] {0.90}}c}
+    \begin{tabular}{l G G G c}
+        \toprule
+            \textbf{Method $\downarrow$ / Benchmark $\rightarrow$} & \textbf{\compmix}  & \textbf{\crag} & \textbf{\timequestions} & \textbf{\#Parameters} \\ 
+        \midrule
+            \textbf{\gptthree} 
+            & $0.502$ &   $-$ & $0.224$ & $175{,}000$ M  \\
+            % #params from https://arxiv.org/pdf/2402.06196
+
+            \textbf{\gptfour}
+            & $0.528$ &   $\mathbf{0.633}$ & $0.306$ & $1{,}760{,}000$ M \\
+            % #params from https://arxiv.org/pdf/2402.06196
+
+            \textbf{\llama~\cite{Touvron-LLaMA}} (8B-Instruct)
+            & $0.431$ &   $0.385$ & $0.178$ & $8{,}030$ M  \\
+            % #params from Huggingface (8,030,257,152)
+        \midrule
+            \textbf{\convinse~\cite{Christmann-CONVINSE:SIGIR2022}}
+            & $0.407$  &   $0.298$ & $0.423$  & $362$ M \\
+            % FiD: 222,903,936 + BART (SR-generation): 139,420,416 = 362,324,352 (python explaignn/question_understanding/structured_representation/get_num_params.py)
+
+            \textbf{\unikqa~\cite{Oguz-UniK-QA:NAACL2022}}
+            & $0.440$ &   $0.280$ & $0.424$ & $223$ M  \\
+            % FiD: 222,903,936 (python explaignn/heterogeneous_answering/fid_module/FiD/get_num_params.py)
+    
+            \textbf{\explaignn~\cite{Christmann-Explaignn:SIGIR2023}} 
+            & $0.442$ &   $0.303$ & $0.525$  & $328$ M \\
+            % BART (SR-generation): 139,420,416 + 2GNNs: 94520832 + 93930240 = 327,871,488
+
+        \midrule 
+            \textbf{\textsc{State-of-the-art}}
+            & $\mathbf{0.565}$ 
+            & $-$
+            & $0.571$  & $-$ \\
+
+            & (\textsc{Spaghetti}~\cite{Zhang-Spaghetti:ACL2024})
+            & 
+            & (\textsc{Un-Faith}~\cite{Jia-FAITH:WWW2024}) &  \\
+
+        \midrule
+            \textbf{\method (ours)}
+            & ${0.564}$ &   $0.362$ & $\mathbf{0.754}$  & $8{,}218$ M \\
+            % BART (SR-generation): 139,420,416 + LLaMA: 8,030,257,152 + GNNs: 25,670,016 + 22,268,928 =  8,217,616,510
+        \bottomrule
+    \end{tabular} 
+    \vspace*{-0.2cm}
+    \caption{End-to-end P@1 of \method and baselines on three benchmarks. Results for \gptthree and \gptfour are taken from the literature~\cite{Christmann-CompMix:WWW2024, Jia-FAITH:WWW2024}. \gptthree is not accessible anymore, hence no results on \crag.
+    }
+    \label{tab:main-res}
+\end{table}
+
+
+
+
+
+%%% ANSWER SOURCES
+\myparagraph{Integration of heterogeneous sources is vital}
+\method integrates evidence from text, KG and tables into a unified framework.
+We aim to better understand how this affects the answering performance of the method.
+Table~\ref{tab:sources} shows end-to-end answering performance of \method
+with different combinations of the input sources.
+The results clearly indicate that all types of sources contribute, with option Text+KG+Tables performing best,
+with a large margin over tapping only single source types.
+
+\begin{table} [t] 
+    \centering
+    \newcolumntype{G}{>{\columncolor [gray] {0.90}}c}
+    \newcolumntype{H}{>{\setbox0=\hbox\bgroup}c<{\egroup}@{}}
+    	\begin{tabular}{l G G G H H H c c c} 
+        \toprule
+            \textbf{Benchmark $\rightarrow$}
+                & \multicolumn{3}{G}{\textbf{\compmix}} 
+                & \multicolumn{3}{H}{\textbf{\crag}}
+                & \multicolumn{3}{c}{\textbf{\timequestions}} \\ 
+        \midrule
+            \textbf{Input sources $\downarrow$ / Metric $\rightarrow$}
+                & \textbf{P@1} & \textbf{AP@100}  & \textbf{AP@30}
+                & \textbf{P@1} & \textbf{AP@100}  & \textbf{AP@30}
+                & \textbf{P@1} & \textbf{AP@100}  & \textbf{AP@30} \\
+            \midrule
+                \textbf{Text}           &  $0.455$  &  $0.563$  &  $0.531$ &  $?$  &  $?$  &  $?$ &  $0.539$  &  $0.515$  &  $0.487$   \\
+                \textbf{KG}             &  $0.481$  &  $0.677$  &  $0.637$ &  $?$  &  $?$  &  $?$ &  $0.724$  &  $0.701$  &  $0.674$   \\
+                \textbf{Tables}         &  $0.432$  &  $0.501$  &  $0.482$ &  $?$  &  $?$  &  $?$ &  $0.536$  &  $0.347$  &  $0.328$   \\
+            \midrule
+                \textbf{Text+KG}        &  $0.537$  &  $0.749$  &  $0.706$ &  $?$  &  $?$  &  $?$ &  $0.745$  &  $\mathbf{0.776}$  &  $0.748$   \\
+                \textbf{Text+Tables}    &  $0.503$  &  $0.632$  &  $0.594$ &  $?$  &  $?$  &  $?$ &  $0.567$  &  $0.578$  &  $0.549$   \\
+                \textbf{KG+Tables}      &  $0.524$  &  $0.728$  &  $0.692$ &  $?$  &  $?$  &  $?$ &  $ 0.743$  &  $0.731$  &  $0.703$   \\
+            \midrule
+                \textbf{Text+KG+Tables}    &  $\mathbf{0.564}$  &  $\mathbf{0.759}$  &  $\mathbf{0.724}$ &  $?$ &  $?$  &  $?$ & $\mathbf{0.754}$    & $\mathbf{0.776}$  &  $\mathbf{0.749}$   \\
+            \bottomrule
+    \end{tabular}
+    \vspace*{-0.2cm}
+    \caption{Answer presence and answering precision of \method with different combinations of input sources (on the respective test sets).}
+    \label{tab:sources}
+\end{table}
+
+
+
+
+\subsection{Analysis}
+
+%%% TOP-K vs. 3xTOP-(K/3)
+\myparagraph{Unified retrieval enhances performance}
+In the RF stage, we re-rank and filter evidence from different source types,
+and feed the unified top-\textit{k}* into the AG stage.
+We conduct a comparison in which we consider
+the top-$10$ evidence pieces from each source type individually. This gives equal influence to KG, text and tables, whereas our default is based on global ranking.
+Table~\ref{tab:unified-retrieval} shows the results for this analysis, showing our default choice performs better.
+The reason is that different questions require different amounts of evidence from each of the source types.
+
+\begin{table} [t] 
+    \centering
+    \newcolumntype{G}{>{\columncolor [gray] {0.90}}c}
+    \newcolumntype{H}{>{\setbox0=\hbox\bgroup}c<{\egroup}@{}}
+    	\begin{tabular}{l G G H H} 
+        \toprule
+            \textbf{Input evidences $\downarrow$ / Metric $\rightarrow$} & \textbf{P@1} & \textbf{AP@30}  & \textbf{\crag} & \textbf{\timequestions} \\ 
+            \midrule
+                \textbf{Top-30 Text+KG+Tables (ours)}             &  $\mathbf{0.574}$  &  $\mathbf{0.710}$  &  $-$  &  $-$   \\
+                \textbf{Top-10 Text + Top-10 KG + Top-10 Tables}        &  $0.560$    &  $0.709$  &  $-$  &  $-$   \\
+            \bottomrule
+    \end{tabular}
+    \vspace*{-0.2cm}
+    \caption{Answer presence and precision
+    of \method for different choices of top-30 
+    (on \compmix dev set).}
+    \label{tab:unified-retrieval}
+\end{table}
+
+
+%%% NUMBER OF EVIDENCES
+\myparagraph{\method works well with small amounts of evidence}
+We investigate the 
+influence of 
+the number of evidence pieces
+fed into the AG stage, varying it from $5$ to $100$.
+Results are shown in Figure~\ref{fig:res-num-evidences}.
+As the curve shows, there is a sharp increase in precision as we add evidence up to 30 or 40 pieces, which is around our default of top-30. This indicates that a certain amount of evidence is needed, to overcome the inherent noise and arrive at sufficient answer presence. 
+As we increase the amount of evidence further, we observe a saturation effect, and eventually a degration of performance. Too much evidence not only has diminishing returns, but can actually be confusing for the AG stage. This reconfirms our heuristic choice of top-30: enough for good answering while keeping computational costs reasonably low.
+
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.8\textwidth]{submissions/Gerhard2024/figures/p_at_1-line_with_evidences.pdf}
+    \vspace*{-0.2cm}
+    \caption{Performance of \method on the \compmix dev set with different numbers of evidence.}
+    \label{fig:res-num-evidences}
+    \vspace*{-0.2cm}
+\end{figure}
+
+
+
+%%% ABLATION
+\myparagraph{Ablation study on re-ranking} For more insight on the possible configurations of the RF stage, we conducted an ablation study with different options, including solely relying on the initial BM25 scoring without explicit re-ranking. The results are shown in Table \ref{tab:ablation2}. We observe that the iterative reduction in two steps is slightly better than the single-step variants (going down from top-1000 to top-30 in one RF step). Between the two options of using a GNN or a CE, the differences are negligible. A notable effect is that our RF techniques retain the answer presence at a very high level, only a bit lower than for the initial top-1000. 
+The last two rows of Table \ref{tab:ablation2} demonstrate that RF is crucial: without explicit re-ranking, the technique of just picking smaller top-$k$ from the original BM25 model leads to substantial degradation in both answer presence and precision. 
+
+
+\begin{table} [t] \small
+    \centering
+    \newcolumntype{G}{>{\columncolor [gray] {0.90}}c}
+    \newcolumntype{H}{>{\setbox0=\hbox\bgroup}c<{\egroup}@{}}
+    	\begin{tabular}{l G H G G G} 
+        \toprule
+            & \multicolumn{5}{G}{\textbf{\compmix} (dev set)} \\
+        \midrule
+            \textbf{RF Method $\downarrow$ / Metric $\rightarrow$} & \textbf{P@1} & \textbf{AP@1000} & \textbf{AP@100}  & \textbf{AP@30} & \textbf{MRR@100} \\ 
+        \midrule
+            \textbf{GNN: 1000 $\rightarrow$ 100 $\rightarrow$ 30}             &  $\mathbf{0.574}$  & $0.760$ &  $0.738$  &  $0.710$  &  $\mathbf{0.572}$  \\
+            \textbf{CE: 1000 $\rightarrow$ 100 $\rightarrow$ 30}          &  $0.573$  & $0.760$  &   $\mathbf{0.740}$ &  $\mathbf{0.721}$   &  $0.553$   \\
+        \midrule
+            \textbf{GNN: 1000 $\rightarrow$ 30} &  $0.567$  & $?$  &   $n/a$ &  $0.710$   &  $0.567$   \\
+         \textbf{CE: 1000 $\rightarrow$ 30} &  $0.570$  & $0.760$  &   $n/a$ &  $0.715$   &  $0.558$   \\
+            \midrule
+           \textbf{BM25: 100 (w/o GNN or CE)} &  $0.490$ & $0.760$  &  $0.652$  &  $n/a$  &  $0.259$ \\       
+            \textbf{BM25: 30 (w/o GNN or CE)} &  $0.468$  & $0.760$  &  $n/a$ &  $0.534$   &  $0.259$   \\
+            \bottomrule
+    \end{tabular}
+    \vspace*{-0.2cm}
+    \caption{Ablation study for different RF strategies of \method on the \compmix dev set. The answer presence in the RF input with top-$1000$ evidence pieces is $0.760$.}
+    \label{tab:ablation2}
+\end{table}
+
+
+
+\myparagraph{Quality of SI}
+To assess the quality and robustness of the Structured Intents, we
+inspected a sample of questions and their SIs.
+Table~\ref{tab:question-SI-examples} gives three anecdotic examples.
+We show SIs generated by \method, which makes use of the pre-existing collection from the \compmix benchmark for training.
+This training data was obtained via different heuristics, 
+which can be a limiting factor when user intents become more complex.
+
+Therefore, we also looked at SIs derived via in-context learning (ICL) using \gptfour with $5$ handcrafted examples.
+As shown in our earlier work on temporal QA~\cite{Jia-FAITH:WWW2024},
+such data can be used for training smaller models (e.g., BART),
+which can greatly boost the completeness and overall quality of the generated SIs.
+
+From the sampled set, we observed that the ICL-based SIs are more
+complete with all slots filled, whereas the BART-based SIs focused more
+on the main slots Answer-type, Entities and Relation.
+However, both approaches achieve very high quality in filling the slots,
+capturing the user's information need very well.
+
+Interestingly, when questions get complicated, with nested phrases, 
+the ICL-based variant succeeds in decomposing the questions, based on only $5$ ICL examples.
+For example, for the question {\em ``which German state had the most Corona-related death cases in the first year after the outbreak?''}
+the Time slot becomes {\em ``first year after Corona outbreak''},
+which can be resolved to identify the temporal scope.
+In general, we believe that such question decomposition, beyond simple temporal constraints,
+would be an interesting theme for future work.
+
+\begin{table} [t] 
+    \centering
+    \small
+    \newcolumntype{G}{>{\columncolor [gray] {0.90}}c}
+    \newcolumntype{H}{>{\setbox0=\hbox\bgroup}c<{\egroup}@{}}
+    \resizebox*{\textwidth}{!}{
+        \begin{tabular}{p{6cm}|p{6cm}|p{6cm}} 
+        \toprule
+            \textbf{Question} & \textbf{Current SI by \method} & \textbf{SI via ICL} \\
+        \midrule
+        \textit{what was disneys first color movie?}
+            & Ans-Type: \textit{animated feature film} & Ans-Type: \textit{film, animated film} \\
+            & Entities: \textit{disneys} & Entities: \textit{Disney} \\
+            & Relation: \textit{was first color movie} & Relation: \textit{first color movie} \\
+            &  & Time: \textit{first} \\
+        \midrule
+        \textit{at the oscars, who won best actor in 2018?}
+            & Ans-Type: \textit{human} & Ans-Type: \textit{person, actor} \\
+            & Entities: \textit{at the oscars} & Entities: \textit{Oscars, 2018} \\
+            & Relation: \textit{who won best actor in 2018} & Relation: \textit{won best actor} \\
+            &  & Time: \textit{2018} \\
+        \midrule
+        \textit{which German state had the most Corona-} & Ans-Type: \textit{state} & Ans-Type: \textit{location, state} \\
+        \textit{related death cases in the first year after} & Entities: \textit{Germany, Corona} & Entities: \textit{Germany, Corona-related deaths} \\
+        \textit{the outbreak?} & Relation: \textit{which state had the most related} & Relation: \textit{highest count of death cases} \\
+        & \textit{death cases in the first year after the out-}  & Location: \textit{Germany} \\
+            & \textit{break}  & Time: \textit{first year after Corona outbreak} \\
+        \bottomrule
+    \end{tabular}
+    }
+    \vspace*{-0.2cm}
+    \caption{Examples for pairs of question and generated SI.}
+    \label{tab:question-SI-examples}
+\end{table}
+
+
+
+
+%%% REFRAIN FROM ANSWER
+\myparagraph{Refraining from answering}
+%%% Searched for: "generated_answer I" (with I being the full word, not partial) in the generated answers of LLaMA
+%%% yields 245 results out of 2764 questions on CompMix
+%%% yields 1270 results out of 3237 questions on TimeQuestions
+We can train our model to refrain from answering in scenarios
+where the provided evidence does not contain an answer to the question.
+Specifically, during training, when the answer is not present in the evidence,
+we change the target answer to {\em unknown}. This variant is referred to as \method {\em (faithful)}.
+
+We measure the ratio of questions for which {\em unknown} is provided as answer,
+and the P@1 restricted to questions that are answered.
+The accuracy of refraining from answering is measured as well,
+based on whether the answer is present in the evidence or not.
+We conduct this experiment on \compmix and \timequestions,
+for which we can compute answer presence exactly.
+We also compute results for \llama, which is already instructed 
+with the option to answer ``don't know''.
+Table~\ref{tab:refrain-from-answer} shows the results.
+For \compmix, we observe that \method has high accuracy on refraining when appropriate,
+whereas \llama tends to be overconfident with a very small rate of {\em unknowns}, leading to incorrect answers.
+
+\begin{table} [t] \small
+    \centering
+    \newcolumntype{G}{>{\columncolor [gray] {0.90}}c}
+    \newcolumntype{H}{>{\setbox0=\hbox\bgroup}c<{\egroup}@{}}
+    	\begin{tabular}{l G G G G c c c c} 
+        \toprule
+            & \multicolumn{4}{G}{\textbf{\compmix}} & \multicolumn{4}{c}{\textbf{\timequestions}} \\
+            \midrule
+            \textbf{Metric $\rightarrow$} & \textbf{P@1}  & \textbf{P@1} & \textbf{Refrain} & \textbf{Refrain} & \textbf{P@1}  & \textbf{P@1} & \textbf{Refrain} & \textbf{Refrain} \\ 
+            \textbf{Method $\downarrow$} &                 & \textbf{(answered)} & \textbf{rate} & \textbf{accuracy} &                 & \textbf{(answered)} & \textbf{rate} & \textbf{accuracy} \\ 
+            \midrule
+                \textbf{\llama}             &  $0.431$  &  $0.471$  &  $0.089$  &  $n/a$  &  $0.177$  &  $0.276$  &  $0.392$  &  $n/a$  \\
+                \textbf{\method (faithful)}           &  $0.497$  &  $0.713$  &  $0.303$  &  $0.838$ &  $0.597$  &  $0.804$  &  $0.257$  &  $0.864$  \\
+            \bottomrule
+    \end{tabular}
+    \vspace*{-0.2cm}
+    \caption{
+        Performance of \method with option to refrain from answering (``don't know'').
+    }
+    \label{tab:refrain-from-answer}
+\end{table}

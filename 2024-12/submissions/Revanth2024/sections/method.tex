@@ -1,0 +1,96 @@
+\section{Method}
+
+Here we discuss the standard retrieve-and-rerank (R\&R) framework for IR (\S{\ref{sec:retrieve_and_rerank}}) and how our proposal fits into it (\S{\ref{sec:cross_encoder_feedback}}). While our approach can be applied to any R\&R framework, we consider a text-based retriever and reranker for simplicity while elaborating our method. A multi-modal R\&R framework is described in \S\ref{sec:multimodal_results}.
+
+
+\subsection{Retrieve-and-Rerank}
+\label{sec:retrieve_and_rerank}
+R\&R for IR consists of a first-stage retriever and a second-stage reranker. Modern neural approaches typically use a dual-encoder model as the retriever and a cross-encoder for reranking.  
+
+\paragraph{\textbf{The Retriever}:} The dual-encoder retriever model is based on a Siamese neural network \cite{chicco2021siamese}, containing separate Bert-based \cite{devlin2019bert} encoders $E_Q(.)$ and $E_P(.)$ for the query and the passage, respectively.
+Given a query $q$ and a passage $p$, a separate representation is obtained for each, such as the \textsc{cls} output or a pooled representation of the individual token outputs from $E_Q(q)$ and $E_P(p)$. The question-passage similarity $sim(q,p)$ is computed as the dot product of their corresponding representations: query/passage.}
+\begin{equation}
+    Q_q = Pool(E_Q(q))
+\end{equation}
+\begin{equation}
+    P_p = Pool(E_P(p))
+\end{equation}
+\begin{equation}\label{eq:sim}
+   sim(q,p) = S(Q_q,P_p) = Q_q^TP_p
+\end{equation}
+
+Since Eq.~\ref{eq:sim} is decomposable, the representations of all passages in the retrieval corpus can be pre-computed and stored in a dense index \cite{johnson2019billion}. During inference, given a new query, the top $K$ most relevant passages are retrieved from the index via approximate nearest-neighbor search.
+
+\paragraph{\textbf{The Reranker}:} The cross-encoder reranker model uses a Bert-based encoder $E_R(.)$, which takes the query $q$ and a corresponding retrieved passage $p$ together as input and outputs a similarity score. 
+A feed-forward layer $F$ is used on top of the \textsc{cls} output from $E_R(.)$ to compute a single logit, which is used as the final reranker score $R(q,p)$. The top $K$ retrieved passages are then ranked based on their corresponding reranker scores.
+
+\begin{equation}
+   R(q,p) = F(CLS(E_R(q,p))
+\end{equation}
+
+
+\begin{algorithm}[t]
+\caption{\textsc{\textbf{ReFIT}}}
+\label{alg4}
+\begin{flushleft}
+\textbf{Input}: Query $q$ and its representation $Q_q$, retrieved passages $P$ and their representations $\hat{P}$.\newline
+\textbf{Output}: Updated query representation $Q_{q,n}$
+\end{flushleft}
+\begin{algorithmic}[1]
+    \State Initialize query vector $Q_{q,0}$ = $Q_q$
+    \State Compute reranker distribution $D_{CE}(q,P)$ (Eq.~\ref{eq:d-ce})
+    \For{\textit{i in 0 to n}}
+        \State Compute retriever distribution $D_{Q_{q,i}}(\hat{P})$ (Eq.~\ref{eq:d-q})
+        \State Compute loss $\mathcal{L}$ (Eq.~\ref{eq:loss})
+        \State Update $Q_{q,i+1} = Q_{q,i} - \alpha \frac{\partial}{\partial Q_{q,i}}\mathcal{L}$
+    \EndFor
+    \State return $Q_{q,n}$
+\end{algorithmic}
+%\vspace{-0.4em}
+\end{algorithm}
+
+\subsection{Reranker Relevance Feedback}
+\label{sec:cross_encoder_feedback}
+The main idea underlying our proposal is to compute an improved query representation for the retriever using feedback from the more powerful reranker.
+More specifically, we perform a lightweight inference-time distillation of the reranker's knowledge into a new query vector.
+
+Given an input query $q$ during inference, we use the following output provided by the R\&R pipeline:
+\begin{itemize}
+   \item Query representation $Q_q$ from the retriever.
+    \item Retrieved passages $P = \{p_1, p_2,  ..., p_K\}$ and their representations $\hat{P} = [P_{p_1}, P_{p_1},  ..., P_{p_K}]$ from the retriever. 
+    \item The reranking scores $R(q,P) = [R(q,p_1),..., R(q,p_K)]$.
+\end{itemize}
+Note that $\hat{P}$ above is directly obtained from the passage index and is not computed during inference.
+
+The proposed reranker feedback mechanism begins with using the reranking scores $R(q,P)$ to compute a cross-encoder ranking distribution $D_{CE}(q,P)$ over passages $P$ as follows:
+
+\begin{equation}
+D_{CE}(q,P)=\mathrm{softmax}([R(q,p_1), ..., R(q,p_K)])
+\label{eq:d-ce}
+\end{equation} 
+
+The query and passage representations from the retriever are used to compute a similar distribution $D_{Q_q}(\hat{P})$ over $P$:
+
+\begin{equation}
+    D_{Q_q}(\hat{P}) = \mathrm{softmax}([Q_q^TP_{p_1}, ..., Q_q^TP_{p_K}])
+    \label{eq:d-q}
+\end{equation}
+
+Next, we compute the loss as the KL-divergence between the retriever and reranker distributions:
+
+\begin{equation}
+    \mathcal{L} = D_{KL}(D_{CE}(q,P) || D_{Q_q}(\hat{P}))
+    \label{eq:loss}
+\end{equation}
+
+which is then used to update the query vector via gradient descent. The query vector update process is repeated for $n$ times, where $n$ is a hyper-parameter. 
+A schematic description of the process can be found in Algorithm \ref{alg4}. 
+
+Finally, the updated query vector $Q_{q,n}$ is used for a second-stage retrieval from the passage index.  
+From dual-encoder retrieval with the updated $Q_{q,n}$, we aim to achieve better recall than with the initial $Q_q$, while obtaining a ranking performance that is comparable with that of the reranker.
+
+
+
+
+
+
